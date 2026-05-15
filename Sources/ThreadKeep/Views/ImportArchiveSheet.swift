@@ -17,9 +17,9 @@ enum MessagesImportMode: String, CaseIterable {
     var subtitle: String {
         switch self {
         case .all:
-            return "Bring in everything from Messages on this Mac."
+            return "Import all conversations from Messages on this Mac."
         case .single:
-            return "Choose specific conversations to load first."
+            return "Select the conversations to add to your library."
         }
     }
 }
@@ -167,9 +167,9 @@ struct ImportArchiveSheet: View {
     private var header: some View {
         HStack {
             VStack(alignment: .leading, spacing: 6) {
-                Text("Bring in Your Conversations")
+                Text("Add Conversations")
                     .font(.title2.bold())
-                Text("ThreadKeep reads Messages already on this Mac, then brings those conversations into your library here.")
+                Text("ThreadKeep reads Messages on this Mac and creates a local library.")
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
             }
@@ -311,13 +311,13 @@ struct ImportArchiveSheet: View {
 
         switch importMode {
         case .all:
-            let baseCopy = "Bring in everything from Messages on this Mac. Each conversation stays separate in your library after import."
+            let baseCopy = "Conversations remain separate after import."
             if messagesChats.count >= 200 {
-                return "\(baseCopy) Larger libraries can take a while on the first pass, but you only need to start it once."
+                return "\(baseCopy) Large libraries may take longer on the first pass."
             }
             return baseCopy
         case .single:
-            return "Choose specific conversations to load first. This is usually faster when you want a focused import."
+            return "Select one conversation or a smaller set."
         }
     }
 
@@ -338,7 +338,7 @@ struct ImportArchiveSheet: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Messages on This Mac")
                         .font(.headline)
-                    Text("After import, your conversations appear in the library on the left.")
+                    Text("Imported conversations appear in the library.")
                         .font(.system(size: 12))
                         .foregroundStyle(.secondary)
                 }
@@ -369,7 +369,7 @@ struct ImportArchiveSheet: View {
                 }
             } else {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("How much would you like to import?")
+                    Text("What would you like to import?")
                         .font(.system(size: 12, weight: .semibold))
 
                     Picker("Import Scope", selection: $importMode) {
@@ -391,7 +391,7 @@ struct ImportArchiveSheet: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
 
-                TextField("Search conversations by name, number, email, or date", text: $messagesSearchText)
+                TextField("Search by name, number, email, or date", text: $messagesSearchText)
                     .textFieldStyle(.roundedBorder)
 
                 if !messagesChats.isEmpty, !canRenderResolvedChatList {
@@ -438,13 +438,13 @@ struct ImportArchiveSheet: View {
                         .frame(minHeight: 280, maxHeight: 380)
 
                         if filteredMessagesChats.isEmpty {
-                            Text("No conversations match that search right now.")
+                            Text("No conversations found. Try a different name, number, or date.")
                                 .font(.system(size: 11))
                                 .foregroundStyle(.secondary)
                         }
 
                         HStack {
-                            Text("Select one conversation, a few, or the full list from Messages on this Mac.")
+                            Text("Select one conversation, a few, or the full list.")
                                 .font(.system(size: 11))
                                 .foregroundStyle(.secondary)
                             Spacer()
@@ -458,7 +458,7 @@ struct ImportArchiveSheet: View {
                         }
                     }
                 } else if isLoadingMessagesChats {
-                    Text("Reading conversations from this Mac…")
+                    Text("Indexing conversations…")
                         .font(.system(size: 12))
                         .foregroundStyle(.secondary)
                 } else if showsManualMessagesFallback {
@@ -470,7 +470,7 @@ struct ImportArchiveSheet: View {
                         .font(.system(size: 12))
                         .foregroundStyle(.secondary)
                 } else {
-                    Text("Choose Fetch My Messages above when you are ready.")
+                    Text("Choose Import Conversations above when you are ready.")
                         .font(.system(size: 12))
                         .foregroundStyle(.secondary)
                 }
@@ -627,9 +627,9 @@ struct ImportArchiveSheet: View {
 
     private var fetchMessagesCard: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Fetch Messages from This Mac")
+            Text("Messages on This Mac")
                 .font(.system(size: 15, weight: .semibold))
-            Text("One click and ThreadKeep pulls in every conversation already stored on this Mac. You can still pick specific ones from the list below if you'd rather.")
+            Text("ThreadKeep reads the conversations stored on this Mac. You can import all conversations or choose the Messages folder manually.")
                 .font(.system(size: 12))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -638,7 +638,7 @@ struct ImportArchiveSheet: View {
                 Button {
                     fetchAllMessagesNow()
                 } label: {
-                    Label("Fetch My Messages", systemImage: "tray.and.arrow.down.fill")
+                    Label("Import Conversations", systemImage: "tray.and.arrow.down.fill")
                         .font(.system(size: 13, weight: .semibold))
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
@@ -942,24 +942,21 @@ struct ImportArchiveSheet: View {
     private func bulkImportProgressMessage(for progress: MessagesBulkImportProgress) -> String {
         switch progress.phase {
         case .preparing:
-            return "Getting Messages on this Mac ready to import…"
+            return "Preparing conversations…"
         case .importing:
             let currentCount = min(progress.completedCount + 1, progress.totalCount)
-            if let currentChatTitle = progress.currentChatTitle?.trimmed.nilIfBlank {
-                return "Importing \(currentCount.formatted(.number)) of \(progress.totalCount.formatted(.number)): \(currentChatTitle)…"
-            }
-            return "Importing \(currentCount.formatted(.number)) of \(progress.totalCount.formatted(.number)) conversations…"
+            return "Adding conversations to your library… \(currentCount.formatted(.number)) of \(progress.totalCount.formatted(.number))"
         case .finishing:
-            return "Saving imported conversations into your library…"
+            return "Saving conversation index…"
         }
     }
 
     private func bulkImportCompletionMessage(for result: MessagesBulkImportResult) -> String {
         if result.skippedCount == 0 {
-            return "Imported \(result.importedCount.formatted(.number)) conversations. Open one from the library, or search all conversations to jump back in."
+            return "\(result.importedCount.formatted(.number)) conversations imported."
         }
 
-        return "Imported \(result.importedCount.formatted(.number)) of \(result.totalRequestedCount.formatted(.number)) conversations. Open one from the library, or search all conversations to jump back in. \(result.skippedCount.formatted(.number)) weren’t ready locally yet and were skipped."
+        return "\(result.importedCount.formatted(.number)) of \(result.totalRequestedCount.formatted(.number)) conversations imported. \(result.skippedCount.formatted(.number)) were not available locally."
     }
 
     private func emptyMessagesStateCopy(autoDetected: Bool) -> String {
@@ -1047,11 +1044,11 @@ struct ImportArchiveSheet: View {
 
         switch state {
         case .authorized:
-            return "Showing saved contact names where they are available on this Mac."
+            return "Using contact names available on this Mac."
         case .notDetermined:
             return "Turn this on if you would like saved contact names to appear."
         case .denied:
-            return "Contacts access is off, so ThreadKeep will show phone numbers or email addresses instead."
+            return "Contacts access is off. ThreadKeep will show phone numbers or email addresses."
         case .disabledByChoice:
             return "Showing phone numbers and email addresses."
         case .unavailable:

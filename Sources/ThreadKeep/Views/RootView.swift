@@ -474,24 +474,24 @@ private struct IntroOnboardingView: View {
     var body: some View {
         VStack {
             VStack(alignment: .leading, spacing: 18) {
-                Text("Welcome to ThreadKeep")
+                Text("Messages Library")
                     .font(.title.bold())
 
-                Text("ThreadKeep turns Messages on your Mac into an easy-to-browse library of conversations you can come back to any time.")
+                Text("Create a local library from Messages on this Mac.")
                     .font(.system(size: 15))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
 
                 VStack(alignment: .leading, spacing: 10) {
-                    Label("See your older Messages conversations in one place.", systemImage: "text.bubble")
-                    Label("Find names, places, links, and old details without endless scrolling.", systemImage: "magnifyingglass")
-                    Label("Choose all conversations or only the ones you want to bring in.", systemImage: "tray.and.arrow.down")
+                    Label("Browse saved conversations in one place.", systemImage: "text.bubble")
+                    Label("Search names, dates, links, and details.", systemImage: "magnifyingglass")
+                    Label("Add all conversations or a smaller set.", systemImage: "tray.and.arrow.down")
                 }
                 .font(.system(size: 13))
                 .foregroundStyle(.secondary)
 
                 VStack(alignment: .leading, spacing: 12) {
-                    Text("Good to know")
+                    Text("Privacy")
                         .font(.system(size: 15, weight: .semibold))
 
                     Text("Your library is kept on this Mac.")
@@ -499,7 +499,7 @@ private struct IntroOnboardingView: View {
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
 
-                    Text("If you export or AirDrop something, that happens only when you choose it.")
+                    Text("Exports happen only when you choose them.")
                         .font(.system(size: 12))
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -510,7 +510,7 @@ private struct IntroOnboardingView: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
-                Toggle("Use saved contact names and photos when available", isOn: $useContactsNames)
+                Toggle("Use contact names and photos when available", isOn: $useContactsNames)
                     .font(.system(size: 13, weight: .medium))
 
                 Text("Turn this off to keep labels as phone numbers or email addresses.")

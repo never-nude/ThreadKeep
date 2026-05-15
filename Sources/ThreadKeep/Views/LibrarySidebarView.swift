@@ -122,9 +122,9 @@ struct LibrarySidebarView: View {
 
             if viewModel.librarySearchResults.isEmpty {
                 ContentUnavailableView(
-                    "No Results",
+                    "No Conversations Found",
                     systemImage: "magnifyingglass",
-                    description: Text("Try another word or name.")
+                    description: Text("Try a different name, number, or date.")
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
@@ -154,7 +154,7 @@ struct LibrarySidebarView: View {
         let resultCount = viewModel.librarySearchResults.count
         let conversationCount = viewModel.librarySearchConversationCount
         if resultCount == 0 {
-            return "No results"
+            return "No matches"
         }
         let resultWord = resultCount == 1 ? "result" : "results"
         let conversationWord = conversationCount == 1 ? "conversation" : "conversations"
