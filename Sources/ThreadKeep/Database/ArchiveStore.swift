@@ -48,6 +48,10 @@ actor ArchiveStore {
             on: database,
             markerURL: self.libraryDirectoryURL.appendingPathComponent(".duplicate-message-cleanup-v2-complete")
         )
+        try Self.runDuplicateMessageCleanupMigrationIfNeeded(
+            on: database,
+            markerURL: self.libraryDirectoryURL.appendingPathComponent(".duplicate-message-cleanup-v3-complete")
+        )
     }
 
     func ensureSeedArchiveImportedIfNeeded() throws -> Bool {
@@ -418,7 +422,7 @@ actor ArchiveStore {
             let threadID = database.columnText(statement, index: 0) ?? ""
             let messageID = database.columnText(statement, index: 1) ?? ""
             let duplicateKeys = SearchMessageDuplicateKey.keys(
-                threadID: threadID,
+                scope: nil,
                 messageID: messageID,
                 senderDisplayName: database.columnText(statement, index: 4) ?? "Unknown",
                 isOutgoing: database.columnInt(statement, index: 7) == 1,
@@ -487,7 +491,7 @@ actor ArchiveStore {
         while sqlite3_step(statement) == SQLITE_ROW {
             let messageID = database.columnText(statement, index: 0) ?? ""
             let duplicateKeys = SearchMessageDuplicateKey.keys(
-                threadID: threadID,
+                scope: threadID,
                 messageID: messageID,
                 senderDisplayName: database.columnText(statement, index: 1) ?? "Unknown",
                 isOutgoing: database.columnInt(statement, index: 4) == 1,
@@ -533,7 +537,7 @@ actor ArchiveStore {
             let text = database.columnText(statement, index: 3) ?? ""
             let messageID = database.columnText(statement, index: 0) ?? ""
             let duplicateKeys = SearchMessageDuplicateKey.keys(
-                threadID: threadID,
+                scope: threadID,
                 messageID: messageID,
                 senderDisplayName: database.columnText(statement, index: 1) ?? "Unknown",
                 isOutgoing: database.columnInt(statement, index: 4) == 1,
@@ -1668,7 +1672,7 @@ actor ArchiveStore {
 
     private enum SearchMessageDuplicateKey {
         static func keys(
-            threadID: String,
+            scope: String?,
             messageID: String,
             senderDisplayName: String,
             isOutgoing: Bool,
@@ -1684,7 +1688,7 @@ actor ArchiveStore {
                 ? "outgoing:me"
                 : "incoming:\(MessageDuplicateKeyHelpers.normalizedText(senderDisplayName))"
             keys.append(MessageDuplicateKeyHelpers.exactMessageKey(
-                scope: threadID,
+                scope: scope,
                 senderKey: senderKey,
                 isOutgoing: isOutgoing,
                 timestamp: timestamp,
@@ -1832,7 +1836,7 @@ actor ArchiveStore {
         }
 
         static func timestampKey(_ timestamp: Double) -> String {
-            String(format: "%.6f", locale: Locale(identifier: "en_US_POSIX"), timestamp)
+            String(Int64(timestamp.rounded(.down)))
         }
     }
 }

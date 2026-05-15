@@ -308,6 +308,29 @@ struct ArchiveValidationTests {
     }
 
     @Test
+    func distinctSourceMessagesWithinSameDisplayedSecondAreCollapsed() async throws {
+        let tempFolder = FileManager.default.temporaryDirectory.appendingPathComponent("ThreadKeepSecondSourceDedup-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: tempFolder) }
+
+        let store = try ArchiveStore(libraryDirectoryURL: tempFolder)
+        let payload = try makeDedupPayload(
+            id: "thread-visible-second-repeat",
+            title: "David Demarco",
+            participantName: "David Demarco",
+            messages: [
+                (id: "m1", body: "Ok", timestamp: Date(timeIntervalSince1970: 1_560_459_927.100), isOutgoing: true, messagesRowID: 210),
+                (id: "m2", body: "Ok", timestamp: Date(timeIntervalSince1970: 1_560_459_927.900), isOutgoing: true, messagesRowID: 211)
+            ]
+        )
+
+        try await store.importArchive(payload)
+
+        let detail = try await #require(store.loadThreadDetail(id: payload.archive.id))
+        #expect(detail.messages.map(\.bodyText) == ["Ok"])
+        #expect(detail.statistics.totalMessages == 1)
+    }
+
+    @Test
     func distinctSourceMessagesWithSameTextAtDifferentTimesArePreserved() async throws {
         let tempFolder = FileManager.default.temporaryDirectory.appendingPathComponent("ThreadKeepDistinctTimeDedup-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: tempFolder) }
@@ -1546,6 +1569,45 @@ struct ArchiveValidationTests {
                 isOutgoing: spec.isOutgoing,
                 bodyText: spec.body,
                 timestamp: testDate(spec.timestamp),
+                service: .iMessage,
+                attachmentIDs: [],
+                replyToMessageID: nil,
+                reactions: [],
+                metadataJSON: spec.messagesRowID.map { "{\"import_source\":\"messages_mac_beta\",\"messages_rowid\":\($0)}" }
+            )
+        }
+
+        return try ParsedArchivePayload.snapshot(
+            archive: ImportedConversationArchive(
+                id: id,
+                title: title,
+                participants: [
+                    ImportedParticipant(id: "you", displayName: "You"),
+                    ImportedParticipant(id: "other", displayName: participantName)
+                ],
+                messages: messages,
+                attachments: [],
+                warnings: [],
+                sourceFilename: "\(id).json"
+            ),
+            sourceKind: .messagesMacBeta
+        )
+    }
+
+    private func makeDedupPayload(
+        id: String,
+        title: String,
+        participantName: String,
+        messages messageSpecs: [(id: String, body: String, timestamp: Date, isOutgoing: Bool, messagesRowID: Int?)]
+    ) throws -> ParsedArchivePayload {
+        let messages = messageSpecs.map { spec in
+            ImportedMessage(
+                id: spec.id,
+                senderID: spec.isOutgoing ? "you" : "other",
+                senderDisplayName: spec.isOutgoing ? "You" : participantName,
+                isOutgoing: spec.isOutgoing,
+                bodyText: spec.body,
+                timestamp: spec.timestamp,
                 service: .iMessage,
                 attachmentIDs: [],
                 replyToMessageID: nil,
