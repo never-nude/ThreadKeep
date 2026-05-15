@@ -9,6 +9,9 @@ struct ThreadDetailView: View {
 
     @FocusState private var isSearchFieldFocused: Bool
     @StateObject private var contactsResolver = ContactDisplayResolver()
+    @State private var isShowingDateJumpPopover = false
+    @State private var selectedJumpDate = Date()
+    @State private var selectedJumpMonthID: String?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -69,6 +72,32 @@ struct ThreadDetailView: View {
                 Image(systemName: "magnifyingglass")
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+
+            Button {
+                prepareDateJumpSelection()
+                isShowingDateJumpPopover.toggle()
+            } label: {
+                Image(systemName: "calendar")
+            }
+            .buttonStyle(.borderless)
+            .disabled(thread.messages.isEmpty)
+            .help("Jump to date")
+            .accessibilityLabel("Jump to date")
+            .popover(isPresented: $isShowingDateJumpPopover, arrowEdge: .trailing) {
+                DateJumpPopover(
+                    thread: thread,
+                    selectedDate: $selectedJumpDate,
+                    selectedMonthID: $selectedJumpMonthID,
+                    onJumpToDate: { date in
+                        viewModel.jumpToDate(date)
+                        isShowingDateJumpPopover = false
+                    },
+                    onJumpToMonth: { monthID in
+                        viewModel.jumpToMonth(monthID)
+                        isShowingDateJumpPopover = false
+                    }
+                )
+            }
 
             if !viewModel.threadSearchResults.isEmpty {
                 Text(searchResultsLabel)
@@ -299,6 +328,22 @@ struct ThreadDetailView: View {
         return "\(currentPosition) of \(resultCount.formatted(.number)) matches"
     }
 
+    private func prepareDateJumpSelection() {
+        let index = thread.dateJumpIndex
+
+        if let startDate = thread.startDate, let endDate = thread.endDate {
+            if selectedJumpDate < startDate || selectedJumpDate > endDate {
+                selectedJumpDate = startDate
+            }
+        } else {
+            selectedJumpDate = Date()
+        }
+
+        if selectedJumpMonthID == nil || !index.monthBuckets.contains(where: { $0.id == selectedJumpMonthID }) {
+            selectedJumpMonthID = index.monthBuckets.first?.id
+        }
+    }
+
     private func scrollTranscript(with proxy: ScrollViewProxy, request: MessageScrollRequest, ignoreStaleRequests: Bool) {
         switch request.target {
         case .day(let date):
@@ -364,6 +409,106 @@ struct ThreadDetailView: View {
         let normalizedDate = Calendar.current.startOfDay(for: date)
         let components = Calendar.current.dateComponents([.year, .month, .day], from: normalizedDate)
         return String(format: "day-%04d-%02d-%02d", components.year ?? 0, components.month ?? 0, components.day ?? 0)
+    }
+}
+
+private enum DateJumpPickerMode: String, CaseIterable, Identifiable {
+    case date
+    case month
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .date:
+            return "Date"
+        case .month:
+            return "Month"
+        }
+    }
+}
+
+private struct DateJumpPopover: View {
+    let thread: ThreadDetail
+    @Binding var selectedDate: Date
+    @Binding var selectedMonthID: String?
+    let onJumpToDate: (Date) -> Void
+    let onJumpToMonth: (String) -> Void
+
+    @State private var mode: DateJumpPickerMode = .date
+
+    private var index: ThreadDateJumpIndex {
+        thread.dateJumpIndex
+    }
+
+    private var dateRange: ClosedRange<Date> {
+        let start = thread.startDate ?? Date()
+        let end = thread.endDate ?? start
+        return min(start, end) ... max(start, end)
+    }
+
+    private var selectedMonthBinding: Binding<String> {
+        Binding(
+            get: {
+                selectedMonthID ?? index.monthBuckets.first?.id ?? ""
+            },
+            set: { newValue in
+                selectedMonthID = newValue
+            }
+        )
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Picker("Jump style", selection: $mode) {
+                ForEach(DateJumpPickerMode.allCases) { mode in
+                    Text(mode.label).tag(mode)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+
+            switch mode {
+            case .date:
+                DatePicker(
+                    "Date",
+                    selection: $selectedDate,
+                    in: dateRange,
+                    displayedComponents: .date
+                )
+                .datePickerStyle(.graphical)
+                .labelsHidden()
+
+                Button {
+                    onJumpToDate(selectedDate)
+                } label: {
+                    Label("Jump to Date", systemImage: "arrow.down.to.line.compact")
+                }
+                .frame(maxWidth: .infinity, alignment: .trailing)
+
+            case .month:
+                Picker("Month", selection: selectedMonthBinding) {
+                    ForEach(index.monthBuckets) { bucket in
+                        Text("\(bucket.label) (\(bucket.messageCount.formatted(.number)))")
+                            .tag(bucket.id)
+                    }
+                }
+                .frame(maxWidth: .infinity)
+
+                Button {
+                    let monthID = selectedMonthID ?? index.monthBuckets.first?.id
+                    if let monthID {
+                        onJumpToMonth(monthID)
+                    }
+                } label: {
+                    Label("Jump to Month", systemImage: "arrow.down.to.line.compact")
+                }
+                .frame(maxWidth: .infinity, alignment: .trailing)
+                .disabled(index.monthBuckets.isEmpty)
+            }
+        }
+        .padding(14)
+        .frame(width: 300)
     }
 }
 

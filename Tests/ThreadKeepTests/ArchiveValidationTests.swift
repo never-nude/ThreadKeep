@@ -818,7 +818,7 @@ struct ArchiveValidationTests {
     }
 
     @Test
-    func threadDateJumpUsesFirstMessageOnOrAfterSelectedDay() {
+    func threadDateJumpUsesFirstMessageOnOrAfterSelectedDay() throws {
         let messages = [
             makeMessage(id: "m1", text: "June opener", timestamp: "2024-06-13T09:00:00Z"),
             makeMessage(id: "m2", text: "July opener", timestamp: "2024-07-01T08:00:00Z"),
@@ -849,12 +849,24 @@ struct ArchiveValidationTests {
             importSourceKind: .jsonArchive
         )
 
+        let jumpIndex = detail.dateJumpIndex
+        #expect(jumpIndex.dayBuckets.map(\.id) == ["2024-06-13", "2024-07-01"])
+        #expect(jumpIndex.monthBuckets.map(\.id) == ["2024-06", "2024-07"])
+        #expect(jumpIndex.monthBuckets.map(\.messageCount) == [1, 2])
+        #expect(jumpIndex.target(forMonthID: "2024-07")?.messageID == "m2")
+
         let requestedDate = ISO8601DateFormatter().date(from: "2024-06-20T17:00:00Z")!
+        let target = try #require(detail.dateJumpTarget(onOrAfter: requestedDate))
+        #expect(target.messageID == "m2")
+        #expect(!target.isExactDayMatch())
         #expect(detail.firstMessageID(onOrAfter: requestedDate) == "m2")
         let expectedMonthDay = Calendar.current.startOfDay(for: ISO8601DateFormatter().date(from: "2024-07-01T08:00:00Z")!)
         #expect(detail.firstDay(in: detail.statistics.monthlyBuckets[0]) == expectedMonthDay)
         #expect(detail.firstMessageID(in: detail.statistics.monthlyBuckets[0]) == "m2")
         #expect(detail.day(containingMessageID: "m2") == expectedMonthDay)
+
+        let exactDate = ISO8601DateFormatter().date(from: "2024-07-01T22:00:00Z")!
+        #expect(detail.dateJumpTarget(onOrAfter: exactDate)?.isExactDayMatch() == true)
 
         let afterLastMessage = ISO8601DateFormatter().date(from: "2024-08-01T00:00:00Z")!
         #expect(detail.firstMessageID(onOrAfter: afterLastMessage) == "m3")

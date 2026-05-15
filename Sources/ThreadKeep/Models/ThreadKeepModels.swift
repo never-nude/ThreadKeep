@@ -247,6 +247,158 @@ struct TimelineBucket: Identifiable, Hashable, Sendable {
     let startDate: Date
 }
 
+struct ThreadDateJumpBucket: Identifiable, Hashable, Sendable {
+    let id: String
+    let label: String
+    let startDate: Date
+    let firstMessageID: String
+    let firstMessageDate: Date
+    let messageCount: Int
+}
+
+struct ThreadDateJumpTarget: Hashable, Sendable {
+    let messageID: String
+    let messageDate: Date
+    let messageDay: Date
+    let requestedDate: Date
+
+    func isExactDayMatch(calendar: Calendar = .current) -> Bool {
+        calendar.isDate(messageDay, inSameDayAs: requestedDate)
+    }
+}
+
+struct ThreadDateJumpIndex: Hashable, Sendable {
+    let dayBuckets: [ThreadDateJumpBucket]
+    let monthBuckets: [ThreadDateJumpBucket]
+    private let lastMessageID: String?
+    private let lastMessageDate: Date?
+
+    init(messages: [MessageRecord], calendar: Calendar = .current) {
+        let sortedMessages = messages.sorted {
+            if $0.timestamp == $1.timestamp {
+                return $0.id < $1.id
+            }
+            return $0.timestamp < $1.timestamp
+        }
+        lastMessageID = sortedMessages.last?.id
+        lastMessageDate = sortedMessages.last?.timestamp
+
+        var days: [String: BucketAccumulator] = [:]
+        var months: [String: BucketAccumulator] = [:]
+
+        for message in sortedMessages {
+            let dayStart = calendar.startOfDay(for: message.timestamp)
+            let monthStart = calendar.date(
+                from: calendar.dateComponents([.year, .month], from: message.timestamp)
+            ) ?? dayStart
+
+            Self.append(message, startDate: dayStart, id: Self.dayID(for: dayStart, calendar: calendar), to: &days)
+            Self.append(message, startDate: monthStart, id: Self.monthID(for: monthStart, calendar: calendar), to: &months)
+        }
+
+        dayBuckets = days.map { id, accumulator in
+            ThreadDateJumpBucket(
+                id: id,
+                label: Self.dayLabel(for: accumulator.startDate),
+                startDate: accumulator.startDate,
+                firstMessageID: accumulator.firstMessageID,
+                firstMessageDate: accumulator.firstMessageDate,
+                messageCount: accumulator.messageCount
+            )
+        }
+        .sorted { $0.startDate < $1.startDate }
+
+        monthBuckets = months.map { id, accumulator in
+            ThreadDateJumpBucket(
+                id: id,
+                label: Self.monthLabel(for: accumulator.startDate),
+                startDate: accumulator.startDate,
+                firstMessageID: accumulator.firstMessageID,
+                firstMessageDate: accumulator.firstMessageDate,
+                messageCount: accumulator.messageCount
+            )
+        }
+        .sorted { $0.startDate < $1.startDate }
+    }
+
+    func target(onOrAfter date: Date, calendar: Calendar = .current) -> ThreadDateJumpTarget? {
+        let requestedDay = calendar.startOfDay(for: date)
+        if let bucket = dayBuckets.first(where: { $0.startDate >= requestedDay }) {
+            return target(for: bucket, requestedDate: date, calendar: calendar)
+        }
+
+        guard let lastMessageID, let lastMessageDate else {
+            return nil
+        }
+        return ThreadDateJumpTarget(
+            messageID: lastMessageID,
+            messageDate: lastMessageDate,
+            messageDay: calendar.startOfDay(for: lastMessageDate),
+            requestedDate: date
+        )
+    }
+
+    func target(forMonthID monthID: String, calendar: Calendar = .current) -> ThreadDateJumpTarget? {
+        guard let bucket = monthBuckets.first(where: { $0.id == monthID }) else {
+            return nil
+        }
+        return target(for: bucket, requestedDate: bucket.startDate, calendar: calendar)
+    }
+
+    private func target(for bucket: ThreadDateJumpBucket, requestedDate: Date, calendar: Calendar) -> ThreadDateJumpTarget {
+        ThreadDateJumpTarget(
+            messageID: bucket.firstMessageID,
+            messageDate: bucket.firstMessageDate,
+            messageDay: calendar.startOfDay(for: bucket.firstMessageDate),
+            requestedDate: requestedDate
+        )
+    }
+
+    private static func append(
+        _ message: MessageRecord,
+        startDate: Date,
+        id: String,
+        to buckets: inout [String: BucketAccumulator]
+    ) {
+        if var bucket = buckets[id] {
+            bucket.messageCount += 1
+            buckets[id] = bucket
+        } else {
+            buckets[id] = BucketAccumulator(
+                startDate: startDate,
+                firstMessageID: message.id,
+                firstMessageDate: message.timestamp,
+                messageCount: 1
+            )
+        }
+    }
+
+    private static func dayID(for date: Date, calendar: Calendar) -> String {
+        let components = calendar.dateComponents([.year, .month, .day], from: date)
+        return String(format: "%04d-%02d-%02d", components.year ?? 0, components.month ?? 0, components.day ?? 0)
+    }
+
+    private static func monthID(for date: Date, calendar: Calendar) -> String {
+        let components = calendar.dateComponents([.year, .month], from: date)
+        return String(format: "%04d-%02d", components.year ?? 0, components.month ?? 0)
+    }
+
+    private static func dayLabel(for date: Date) -> String {
+        date.formatted(.dateTime.month(.abbreviated).day().year())
+    }
+
+    private static func monthLabel(for date: Date) -> String {
+        date.formatted(.dateTime.month(.abbreviated).year())
+    }
+
+    private struct BucketAccumulator: Hashable {
+        let startDate: Date
+        let firstMessageID: String
+        let firstMessageDate: Date
+        var messageCount: Int
+    }
+}
+
 struct ConversationStatistics: Hashable, Sendable {
     let totalMessages: Int
     let outgoingMessages: Int
@@ -329,20 +481,24 @@ struct ThreadDetail: Identifiable, Sendable {
         Array(Set(messages.flatMap(\.linkURLs))).sorted { $0.absoluteString < $1.absoluteString }
     }
 
+    var dateJumpIndex: ThreadDateJumpIndex {
+        ThreadDateJumpIndex(messages: messages)
+    }
+
+    func dateJumpTarget(onOrAfter date: Date, calendar: Calendar = .current) -> ThreadDateJumpTarget? {
+        ThreadDateJumpIndex(messages: messages, calendar: calendar).target(onOrAfter: date, calendar: calendar)
+    }
+
+    func dateJumpTarget(forMonthID monthID: String, calendar: Calendar = .current) -> ThreadDateJumpTarget? {
+        ThreadDateJumpIndex(messages: messages, calendar: calendar).target(forMonthID: monthID, calendar: calendar)
+    }
+
     func firstMessageID(onOrAfter date: Date, calendar: Calendar = .current) -> String? {
-        let startOfDay = calendar.startOfDay(for: date)
-        if let match = messages.first(where: { $0.timestamp >= startOfDay }) {
-            return match.id
-        }
-        return messages.last?.id
+        dateJumpTarget(onOrAfter: date, calendar: calendar)?.messageID
     }
 
     func firstDayOnOrAfter(_ date: Date, calendar: Calendar = .current) -> Date? {
-        let startOfDay = calendar.startOfDay(for: date)
-        if let match = messages.first(where: { $0.timestamp >= startOfDay }) {
-            return calendar.startOfDay(for: match.timestamp)
-        }
-        return messages.last.map { calendar.startOfDay(for: $0.timestamp) }
+        dateJumpTarget(onOrAfter: date, calendar: calendar)?.messageDay
     }
 
     func firstDay(in bucket: TimelineBucket, calendar: Calendar = .current) -> Date? {

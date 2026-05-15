@@ -448,13 +448,25 @@ final class AppViewModel: ObservableObject {
     }
 
     func jumpToDate(_ date: Date) {
-        guard let day = selectedThread?.firstDayOnOrAfter(date) else { return }
-        scrollRequest = MessageScrollRequest(target: .day(day), animated: true)
+        guard let target = selectedThread?.dateJumpTarget(onOrAfter: date) else { return }
+        focusedMessageID = target.messageID
+        scrollRequest = MessageScrollRequest(target: .message(target.messageID), animated: true)
+
+        if !target.isExactDayMatch() {
+            let requested = AppFormatters.libraryRangeStart.string(from: date)
+            let actual = AppFormatters.libraryRangeStart.string(from: target.messageDate)
+            announceStatus("No messages on \(requested). Jumped to \(actual).", autoDismissAfter: 3)
+        }
     }
 
     func jumpToTimelineBucket(_ bucket: TimelineBucket) {
-        guard let day = selectedThread?.firstDay(in: bucket) else { return }
-        scrollRequest = MessageScrollRequest(target: .day(day), animated: true)
+        jumpToDate(bucket.startDate)
+    }
+
+    func jumpToMonth(_ monthID: String) {
+        guard let target = selectedThread?.dateJumpTarget(forMonthID: monthID) else { return }
+        focusedMessageID = target.messageID
+        scrollRequest = MessageScrollRequest(target: .message(target.messageID), animated: true)
     }
 
     func exportSelectedThreadPDF(mode: PDFExportMode = .review) async {
