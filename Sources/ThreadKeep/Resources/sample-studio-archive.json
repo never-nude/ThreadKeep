@@ -1,0 +1,229 @@
+{
+  "thread_id": "studio-notes-2026",
+  "thread_title": "Studio Notes",
+  "participants": [
+    {
+      "id": "nora",
+      "display_name": "Nora Vale"
+    },
+    {
+      "id": "elias",
+      "display_name": "Elias Hart"
+    },
+    {
+      "id": "june",
+      "display_name": "June Mercer"
+    }
+  ],
+  "messages": [
+    {
+      "id": "m001",
+      "sender_id": "nora",
+      "sender_display_name": "Nora",
+      "is_outgoing": true,
+      "body_text": "I imported the February notes into a single archive so we finally have one searchable thread.",
+      "timestamp": "2026-02-18T09:12:00-05:00",
+      "service": "iMessage",
+      "attachment_ids": [],
+      "reactions": [
+        {
+          "sender_id": "june",
+          "sender_display_name": "June",
+          "emoji": "👍",
+          "type": "tapback-like"
+        }
+      ],
+      "metadata": {
+        "source": "manual-export",
+        "review_flag": false
+      }
+    },
+    {
+      "id": "m002",
+      "sender_id": "elias",
+      "sender_display_name": "Elias",
+      "is_outgoing": false,
+      "body_text": "Perfect. Can we keep the kiln schedule and the memorial draft in the same thread for now?",
+      "timestamp": "2026-02-18T09:14:00-05:00",
+      "service": "iMessage",
+      "attachment_ids": [],
+      "reply_to_message_id": "m001"
+    },
+    {
+      "id": "m003",
+      "sender_id": "june",
+      "sender_display_name": "June",
+      "is_outgoing": false,
+      "body_text": "Yes. I added the river light contact sheet too.",
+      "timestamp": "2026-02-18T09:17:00-05:00",
+      "service": "SMS",
+      "attachment_ids": [
+        "a001"
+      ]
+    },
+    {
+      "id": "m004",
+      "sender_id": "nora",
+      "sender_display_name": "Nora",
+      "is_outgoing": true,
+      "body_text": "Linking the conservation memo here as well: https://example.org/memo/conservation-draft",
+      "timestamp": "2026-02-18T09:19:00-05:00",
+      "service": "iMessage",
+      "attachment_ids": [
+        "a004"
+      ],
+      "metadata": {
+        "document_tag": "memo-2b"
+      }
+    },
+    {
+      "id": "m005",
+      "sender_id": "elias",
+      "sender_display_name": "Elias",
+      "is_outgoing": false,
+      "body_text": "I am leaving voice notes instead of typing the caption revisions.",
+      "timestamp": "2026-02-18T09:27:00-05:00",
+      "service": "iMessage",
+      "attachment_ids": [
+        "a002"
+      ]
+    },
+    {
+      "id": "m006",
+      "sender_id": "nora",
+      "sender_display_name": "Nora",
+      "is_outgoing": true,
+      "body_text": "Saved. We should mark anything that needs exact timestamps for review mode later.",
+      "timestamp": "2026-02-18T09:29:00-05:00",
+      "service": "iMessage",
+      "attachment_ids": [],
+      "reactions": [
+        {
+          "sender_id": "elias",
+          "sender_display_name": "Elias",
+          "emoji": "✅"
+        }
+      ]
+    },
+    {
+      "id": "m007",
+      "sender_id": "june",
+      "sender_display_name": "June",
+      "is_outgoing": false,
+      "body_text": "Uploading the program proof. The final date line is on page three.",
+      "timestamp": "2026-02-19T14:02:00-05:00",
+      "service": "iMessage",
+      "attachment_ids": [
+        "a003"
+      ]
+    },
+    {
+      "id": "m008",
+      "sender_id": "nora",
+      "sender_display_name": "Nora",
+      "is_outgoing": true,
+      "body_text": "Received. I also copied the reference link into the archive body text for searchability: https://example.org/reference/late-light",
+      "timestamp": "2026-02-19T14:05:00-05:00",
+      "service": "iMessage",
+      "attachment_ids": []
+    },
+    {
+      "id": "m009",
+      "sender_id": "elias",
+      "sender_display_name": "Elias",
+      "is_outgoing": false,
+      "body_text": "Can we keep the memorial cover page optional? I want a cleaner review export for counsel.",
+      "timestamp": "2026-02-19T14:12:00-05:00",
+      "service": "iMessage",
+      "attachment_ids": []
+    },
+    {
+      "id": "m010",
+      "sender_id": "nora",
+      "sender_display_name": "Nora",
+      "is_outgoing": true,
+      "body_text": "Yes. Review mode should stay precise and plain. Memorial mode can have the softer cover page.",
+      "timestamp": "2026-02-19T14:16:00-05:00",
+      "service": "iMessage",
+      "attachment_ids": [],
+      "reply_to_message_id": "m009"
+    },
+    {
+      "id": "m011",
+      "sender_id": "june",
+      "sender_display_name": "June",
+      "is_outgoing": false,
+      "body_text": "",
+      "timestamp": "2026-02-20T08:48:00-05:00",
+      "service": "SMS",
+      "attachment_ids": [
+        "a005"
+      ]
+    },
+    {
+      "id": "m012",
+      "sender_id": "elias",
+      "sender_display_name": "Elias",
+      "is_outgoing": false,
+      "body_text": "That clipped audio is the room tone from the service. Keep it with the archive.",
+      "timestamp": "2026-02-20T08:50:00-05:00",
+      "service": "SMS",
+      "attachment_ids": [],
+      "reply_to_message_id": "m011"
+    },
+    {
+      "id": "m013",
+      "sender_id": "nora",
+      "sender_display_name": "Nora",
+      "is_outgoing": true,
+      "body_text": "Imported sample looks good. Search for “memorial” or “kiln” when demoing the app.",
+      "timestamp": "2026-02-20T08:57:00-05:00",
+      "service": "iMessage",
+      "attachment_ids": [],
+      "metadata": {
+        "demo_hint": true,
+        "tags": [
+          "sample",
+          "demo"
+        ]
+      }
+    }
+  ],
+  "attachments": [
+    {
+      "id": "a001",
+      "type": "image",
+      "filename": "river-light-contact-sheet.jpg",
+      "local_path": "/Users/example/Archives/river-light-contact-sheet.jpg",
+      "mime_type": "image/jpeg"
+    },
+    {
+      "id": "a002",
+      "type": "audio",
+      "filename": "caption-revisions.m4a",
+      "local_path": "/Users/example/Archives/caption-revisions.m4a",
+      "mime_type": "audio/mp4"
+    },
+    {
+      "id": "a003",
+      "type": "file",
+      "filename": "program-proof-v7.pdf",
+      "local_path": "/Users/example/Archives/program-proof-v7.pdf",
+      "mime_type": "application/pdf"
+    },
+    {
+      "id": "a004",
+      "type": "link",
+      "filename": "conservation-draft",
+      "url": "https://example.org/memo/conservation-draft",
+      "mime_type": "text/html"
+    },
+    {
+      "id": "a005",
+      "type": "audio",
+      "filename": "room-tone.m4a",
+      "local_path": "/Users/example/Archives/room-tone.m4a",
+      "mime_type": "audio/mp4"
+    }
+  ]
+}
