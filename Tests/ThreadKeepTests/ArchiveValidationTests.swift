@@ -378,6 +378,48 @@ struct ArchiveValidationTests {
     }
 
     @Test
+    func reimportingSameMessagesChatWithNewTitleReplacesOldInternalThreadID() async throws {
+        let tempFolder = FileManager.default.temporaryDirectory.appendingPathComponent("ThreadKeepReimportMessagesChatTitleChange-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: tempFolder) }
+
+        let store = try ArchiveStore(libraryDirectoryURL: tempFolder)
+        let oldPayload = try makeDedupPayload(
+            id: "messages-mac-24-oldhash",
+            title: "5163612295",
+            participantName: "5163612295",
+            messages: [
+                (id: "old-1", body: "Older source message", timestamp: "2022-11-28T17:15:56Z", isOutgoing: true, messagesRowID: 400),
+                (id: "old-2", body: "Middle source message", timestamp: "2023-01-01T17:15:56Z", isOutgoing: false, messagesRowID: 401)
+            ]
+        )
+        let renamedPayload = try makeDedupPayload(
+            id: "messages-mac-24-newhash",
+            title: "Chris Buonincontri",
+            participantName: "Chris Buonincontri",
+            messages: [
+                (id: "new-1", body: "Older source message", timestamp: "2022-11-28T17:15:56Z", isOutgoing: true, messagesRowID: 400),
+                (id: "new-2", body: "Middle source message", timestamp: "2023-01-01T17:15:56Z", isOutgoing: false, messagesRowID: 401),
+                (id: "new-3", body: "Latest source message", timestamp: "2026-05-18T17:15:56Z", isOutgoing: false, messagesRowID: 402)
+            ]
+        )
+
+        try await store.importArchive(oldPayload)
+        try await store.importArchive(renamedPayload)
+
+        let summaries = try await store.loadThreadSummaries(filters: LibraryFilters())
+        #expect(summaries.map(\.id) == [renamedPayload.archive.id])
+        #expect(summaries.first?.startDate == testDate("2022-11-28T17:15:56Z"))
+        #expect(summaries.first?.messageCount == 3)
+
+        let detail = try await #require(store.loadThreadDetail(id: renamedPayload.archive.id))
+        #expect(detail.messages.map(\.bodyText) == [
+            "Older source message",
+            "Middle source message",
+            "Latest source message"
+        ])
+    }
+
+    @Test
     func validArchiveParsesSuccessfully() throws {
         let payload = try ArchiveParser.parse(data: Data(validArchiveJSON.utf8), sourceFilename: "sample.json")
 

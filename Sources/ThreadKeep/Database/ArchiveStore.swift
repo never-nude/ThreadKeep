@@ -571,7 +571,8 @@ actor ArchiveStore {
         try payload.rawData.write(to: rawArchiveURL, options: .atomic)
         timer.mark("raw archive snapshot")
 
-        let removedSourceMessageIDs = try sourceMessageIDs(threadID: archive.id)
+        let replacementThreadIDs = try replacementThreadIDs(for: archive.id, sourceKind: payload.sourceKind)
+        let removedSourceMessageIDs = try sourceMessageIDs(threadIDs: replacementThreadIDs)
         var existingSourceMessageIDs = try existingSourceMessageIDsForImport()
         existingSourceMessageIDs.subtract(removedSourceMessageIDs)
         let archiveMessages = messagesSkippingExistingSourceDuplicates(
@@ -593,7 +594,9 @@ actor ArchiveStore {
         timer.mark("scoped id preparation")
 
         try database.transaction {
-            try deleteThreadRecords(threadID: archive.id)
+            for threadID in replacementThreadIDs {
+                try deleteThreadRecords(threadID: threadID)
+            }
 
             guard !archiveMessages.isEmpty else {
                 try Self.cleanupOrphanedParticipants(on: database)
@@ -767,6 +770,56 @@ actor ArchiveStore {
         return first ... last
     }
 
+    private func replacementThreadIDs(for archiveID: String, sourceKind: ImportSourceKind) throws -> [String] {
+        guard sourceKind == .messagesMacBeta,
+              let sourcePrefix = messagesMacThreadIDSourcePrefix(from: archiveID)
+        else {
+            return [archiveID]
+        }
+
+        let statement = try database.prepare(
+            """
+            SELECT id
+            FROM threads
+            WHERE id = ?1 OR id LIKE ?2 ESCAPE '\\';
+            """
+        )
+        defer { database.finalize(statement) }
+
+        database.bind(archiveID, at: 1, in: statement)
+        database.bind(sqlLikeEscapedPrefix(sourcePrefix) + "%", at: 2, in: statement)
+
+        var ids: [String] = []
+        while sqlite3_step(statement) == SQLITE_ROW {
+            if let id = database.columnText(statement, index: 0), !ids.contains(id) {
+                ids.append(id)
+            }
+        }
+
+        if !ids.contains(archiveID) {
+            ids.append(archiveID)
+        }
+        return ids
+    }
+
+    private func messagesMacThreadIDSourcePrefix(from archiveID: String) -> String? {
+        let prefix = "messages-mac-"
+        guard archiveID.hasPrefix(prefix) else { return nil }
+
+        let remainder = archiveID.dropFirst(prefix.count)
+        guard let separator = remainder.firstIndex(of: "-") else { return nil }
+        let chatID = remainder[..<separator]
+        guard !chatID.isEmpty, chatID.allSatisfy(\.isNumber) else { return nil }
+        return "\(prefix)\(chatID)-"
+    }
+
+    private func sqlLikeEscapedPrefix(_ value: String) -> String {
+        value
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "%", with: "\\%")
+            .replacingOccurrences(of: "_", with: "\\_")
+    }
+
     private func deduplicatedImportedMessages(_ messages: [ImportedMessage], archiveID: String) -> [ImportedMessage] {
         var seenKeys = Set<String>()
         return messages.filter { message in
@@ -807,6 +860,14 @@ actor ArchiveStore {
 
     private func sourceMessageIDs(threadID: String) throws -> Set<String> {
         try Self.loadSourceMessageIDs(on: database, threadID: threadID)
+    }
+
+    private func sourceMessageIDs(threadIDs: [String]) throws -> Set<String> {
+        var ids = Set<String>()
+        for threadID in threadIDs {
+            ids.formUnion(try sourceMessageIDs(threadID: threadID))
+        }
+        return ids
     }
 
     private func sourceMessageIDs(in messages: [ImportedMessage]) -> Set<String> {
