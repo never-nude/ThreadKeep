@@ -520,6 +520,57 @@ struct ArchiveValidationTests {
     }
 
     @Test
+    func messagesStoreChatCandidatesUseRenderableMessageDateRange() throws {
+        let tempFolder = FileManager.default.temporaryDirectory.appendingPathComponent("ThreadKeepMessagesStoreRenderableRange-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: tempFolder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempFolder) }
+
+        let dbURL = tempFolder.appendingPathComponent("chat.db")
+        let database = try SQLiteDatabase(url: dbURL)
+        try database.execute(
+            """
+            CREATE TABLE chat (ROWID INTEGER PRIMARY KEY, chat_identifier TEXT, display_name TEXT, service_name TEXT);
+            CREATE TABLE message (
+                ROWID INTEGER PRIMARY KEY,
+                guid TEXT,
+                text TEXT,
+                attributedBody BLOB,
+                date INTEGER,
+                is_from_me INTEGER,
+                service TEXT,
+                handle_id INTEGER,
+                associated_message_guid TEXT
+            );
+            CREATE TABLE chat_message_join (chat_id INTEGER, message_id INTEGER);
+            CREATE TABLE handle (ROWID INTEGER PRIMARY KEY, id TEXT, uncanonicalized_id TEXT);
+            CREATE TABLE chat_handle_join (chat_id INTEGER, handle_id INTEGER);
+            INSERT INTO chat VALUES (1, 'chris@example.com', NULL, 'iMessage');
+            INSERT INTO handle VALUES (1, 'chris@example.com', 'Chris');
+            INSERT INTO chat_handle_join VALUES (1, 1);
+            INSERT INTO message VALUES (100, 'guid-empty', NULL, NULL, 60, 0, 'iMessage', 1, NULL);
+            INSERT INTO message VALUES (101, 'guid-whitespace', '   ', NULL, 90, 0, 'iMessage', 1, NULL);
+            INSERT INTO message VALUES (102, 'guid-visible', 'Visible message', NULL, 120, 0, 'iMessage', 1, NULL);
+            INSERT INTO chat_message_join VALUES (1, 100);
+            INSERT INTO chat_message_join VALUES (1, 101);
+            INSERT INTO chat_message_join VALUES (1, 102);
+            """
+        )
+
+        let importer = MessagesStoreImporter()
+        let chats = try importer.loadChatCandidates(from: tempFolder)
+        let chat = try #require(chats.first)
+
+        #expect(chat.startDate == Date(timeIntervalSinceReferenceDate: 120))
+        #expect(chat.endDate == Date(timeIntervalSinceReferenceDate: 120))
+        #expect(chat.messageCount == 1)
+
+        let payload = try importer.importChat(id: 1, from: tempFolder)
+        #expect(payload.archive.dateRange?.lowerBound == Date(timeIntervalSinceReferenceDate: 120))
+        #expect(payload.archive.dateRange?.upperBound == Date(timeIntervalSinceReferenceDate: 120))
+        #expect(payload.archive.messages.map(\.bodyText) == ["Visible message"])
+    }
+
+    @Test
     func messagesStoreBulkImportKeepsConversationsSeparate() async throws {
         let tempFolder = FileManager.default.temporaryDirectory.appendingPathComponent("ThreadKeepMessagesStoreBulkImport-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: tempFolder, withIntermediateDirectories: true)

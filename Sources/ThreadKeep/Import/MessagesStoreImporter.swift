@@ -349,23 +349,32 @@ struct MessagesStoreImporter: Sendable {
         let serviceExpression = schema.hasColumn("chat", "service_name") ? "chat.service_name" : "NULL"
         let identifierExpression = schema.hasColumn("chat", "chat_identifier") ? "chat.chat_identifier" : "NULL"
         let dateExpression = schema.hasColumn("message", "date") ? "message.date" : "0"
+        let importableMessagePredicate = chatCandidateImportableMessagePredicate(for: schema)
 
         let sql = """
+        WITH importable_messages AS (
+            SELECT
+                cmj.chat_id,
+                message.ROWID AS message_id,
+                \(dateExpression) AS message_date
+            FROM chat_message_join cmj
+            JOIN message ON message.ROWID = cmj.message_id
+            WHERE \(importableMessagePredicate)
+        )
         SELECT
             chat.ROWID,
             \(displayNameExpression),
             \(identifierExpression),
             \(serviceExpression),
-            MIN(\(dateExpression)),
-            MAX(\(dateExpression)),
-            COUNT(message.ROWID),
+            MIN(importable_messages.message_date),
+            MAX(importable_messages.message_date),
+            COUNT(importable_messages.message_id),
             \(handleJoin ? "GROUP_CONCAT(DISTINCT \(handleDisplayExpression))" : "NULL")
         FROM chat
-        JOIN chat_message_join cmj ON cmj.chat_id = chat.ROWID
-        JOIN message ON message.ROWID = cmj.message_id
+        JOIN importable_messages ON importable_messages.chat_id = chat.ROWID
         \(handleJoin ? "LEFT JOIN chat_handle_join chj ON chj.chat_id = chat.ROWID LEFT JOIN handle ON handle.ROWID = chj.handle_id" : "")
         GROUP BY chat.ROWID
-        ORDER BY MAX(\(dateExpression)) DESC;
+        ORDER BY MAX(importable_messages.message_date) DESC;
         """
 
         let statement = try database.prepare(sql)
@@ -418,6 +427,20 @@ struct MessagesStoreImporter: Sendable {
         }
 
         return chats
+    }
+
+    private func chatCandidateImportableMessagePredicate(for schema: MessagesStoreSchema) -> String {
+        let textPredicate = schema.hasColumn("message", "text")
+            ? "message.text IS NOT NULL AND LENGTH(TRIM(message.text)) > 0"
+            : "0"
+        let attributedBodyPredicate = schema.hasColumn("message", "attributedBody")
+            ? "message.attributedBody IS NOT NULL AND LENGTH(message.attributedBody) > 0"
+            : "0"
+        let attachmentPredicate = schema.hasTable("message_attachment_join")
+            ? "EXISTS (SELECT 1 FROM message_attachment_join maj WHERE maj.message_id = message.ROWID)"
+            : "0"
+
+        return "(\(textPredicate)) OR (\(attributedBodyPredicate)) OR (\(attachmentPredicate))"
     }
 
     private func importChat(
