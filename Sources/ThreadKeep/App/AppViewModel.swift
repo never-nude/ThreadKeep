@@ -605,11 +605,39 @@ final class AppViewModel: ObservableObject {
                 : pdfContactsResolver.resolvedName(for: message.senderDisplayName)
         }
 
+        var participantContactIdentifiersByID: [String: String] = [:]
+        for participant in thread.participants {
+            var candidateHandles = [participant.displayName]
+            for message in thread.messages where message.senderID == participant.id {
+                if let handle = jsonSenderHandle(fromMetadataJSON: message.metadataJSON) {
+                    candidateHandles.append(handle)
+                }
+            }
+            for handle in candidateHandles {
+                if let identifier = pdfContactsResolver.contactIdentifiers(for: handle).first {
+                    participantContactIdentifiersByID[participant.id] = identifier
+                    break
+                }
+            }
+        }
+
         return ThreadJSONNameResolution(
             threadTitle: pdfContactsResolver.title(rawTitle: thread.title, participantNames: participantNames),
             participantNamesByID: participantNamesByID,
-            senderNamesByID: senderNamesByID
+            senderNamesByID: senderNamesByID,
+            participantContactIdentifiersByID: participantContactIdentifiersByID
         )
+    }
+
+    private func jsonSenderHandle(fromMetadataJSON metadataJSON: String?) -> String? {
+        guard let metadataJSON,
+              let data = metadataJSON.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let handle = object["sender_handle"] as? String
+        else {
+            return nil
+        }
+        return handle.trimmed.nilIfBlank
     }
 
     private func jsonExportFolderChoice(prompt: String) -> (destinationURL: URL, includeAttachments: Bool)? {
