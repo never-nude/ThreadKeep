@@ -1595,6 +1595,38 @@ struct ArchiveValidationTests {
         #expect(participants.allSatisfy { $0["cn_contact_identifier"] == nil })
     }
 
+    @Test
+    func groupedMessagesTieBreaksSameSecondByID() throws {
+        let thread = ThreadDetail(
+            id: "thread-order",
+            title: "Ordering Sample",
+            participants: [
+                ParticipantRecord(id: "you", displayName: "You"),
+                ParticipantRecord(id: "sam", displayName: "Sam")
+            ],
+            messages: [
+                makeMessage(id: "m2", text: "second by id", timestamp: "2024-03-01T09:00:00Z"),
+                makeMessage(id: "m1", text: "first by id", timestamp: "2024-03-01T09:00:00Z"),
+                makeMessage(id: "m3", text: "a second later", timestamp: "2024-03-01T09:00:01Z")
+            ],
+            statistics: ConversationStatistics(
+                totalMessages: 3,
+                outgoingMessages: 3,
+                incomingMessages: 0,
+                attachmentMessages: 0,
+                monthlyBuckets: []
+            ),
+            rawArchivePath: nil,
+            importedAt: Date(),
+            importSourceKind: .jsonArchive
+        )
+
+        let groups = thread.groupedMessages
+        #expect(groups.count == 1)
+        let orderedIDs = try #require(groups.first).messages.map(\.id)
+        #expect(orderedIDs == ["m1", "m2", "m3"])
+    }
+
     private func normalizedTimestampString(for date: Date) -> String {
         AppFormatters.preciseMessageTimestamp
             .string(from: date)
