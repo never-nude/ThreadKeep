@@ -73,7 +73,7 @@ struct ImportArchiveSheet: View {
             header
             statusRow
 
-            if fullDiskAccessStatus == .denied {
+            if fullDiskAccessStatus == .denied && messagesChats.isEmpty {
                 fullDiskAccessCard
             } else if messagesChats.isEmpty && !isLoadingMessagesChats && !isPreparingMessagesImport {
                 // One-click "grab everything" entrypoint so the user doesn't have to parse the
@@ -349,7 +349,7 @@ struct ImportArchiveSheet: View {
                 }
             }
 
-            if fullDiskAccessStatus == .denied {
+            if fullDiskAccessStatus == .denied && messagesChats.isEmpty {
                 VStack(alignment: .leading, spacing: 10) {
                     Text("Grant Full Disk Access above, then retry.")
                         .font(.system(size: 12, weight: .semibold))
