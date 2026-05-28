@@ -1,11 +1,14 @@
 # ThreadKeep JSON Export Schema
 
-Schema version: 1
+Schema version: 2
 
 ThreadKeep JSON export writes one folder per conversation. Each folder contains:
 
-- `<conversation>.json`
+- `<conversation>-<YYYY-MM-DD>.json`
 - `attachments/` when attachment copies are included and available
+
+The `<YYYY-MM-DD>` suffix is the local date the export was created. The enclosing
+folder remains `<conversation>-json/`.
 
 The JSON file is UTF-8 and pretty-printed.
 
@@ -14,7 +17,7 @@ The JSON file is UTF-8 and pretty-printed.
 ```json
 {
   "threadkeep_version": "1.0",
-  "schema_version": 1,
+  "schema_version": 2,
   "exported_at": "2026-05-05T17:30:00.000Z",
   "source": {},
   "thread": {},
@@ -48,7 +51,8 @@ when ThreadKeep has a stored import snapshot to hash.
     {
       "display_name": "Nancy Glimcher",
       "handles": ["+15551234567", "nancy@example.com"],
-      "is_me": false
+      "is_me": false,
+      "cn_contact_identifier": "3A2D5E7F-1B2C-4D5E-6F70-89ABCDEF0123"
     }
   ],
   "first_message_at": "2018-05-27T14:23:00.000Z",
@@ -59,6 +63,11 @@ when ThreadKeep has a stored import snapshot to hash.
 
 `type` is `direct` when the exported conversation has one non-me participant and
 `group` otherwise.
+
+`cn_contact_identifier` is the `CNContact.identifier` resolved for the participant
+via ThreadKeep's `ContactDisplayResolver`. The key is present only when a contact
+is resolved (Contacts access granted and a handle matches a contact); it is omitted
+entirely otherwise. It is never emitted as `null`.
 
 ## Message
 

@@ -6,9 +6,14 @@ struct ThreadJSONNameResolution {
     let threadTitle: String
     let participantNamesByID: [String: String]
     let senderNamesByID: [String: String]
+    var participantContactIdentifiersByID: [String: String] = [:]
 
     func participantName(for participant: ParticipantRecord) -> String {
         participantNamesByID[participant.id] ?? participant.displayName
+    }
+
+    func contactIdentifier(for participant: ParticipantRecord) -> String? {
+        participantContactIdentifiersByID[participant.id]
     }
 
     func senderName(for message: MessageRecord) -> String {
@@ -96,7 +101,8 @@ struct ThreadJSONExporter {
                     ThreadJSONV1.Participant(
                         participant: participant,
                         displayName: nameResolution.participantName(for: participant),
-                        handles: participantHandles(for: participant, in: thread.messages)
+                        handles: participantHandles(for: participant, in: thread.messages),
+                        cnContactIdentifier: nameResolution.contactIdentifier(for: participant)
                     )
                 }
             ),
@@ -106,7 +112,8 @@ struct ThreadJSONExporter {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         let data = try encoder.encode(payload)
-        let jsonURL = folderURL.appendingPathComponent("\(thread.title.slugified).json", isDirectory: false)
+        let fileName = "\(thread.title.slugified)-\(Self.fileDateStamp(from: exportedAt)).json"
+        let jsonURL = folderURL.appendingPathComponent(fileName, isDirectory: false)
         try data.write(to: jsonURL, options: [.atomic])
 
         return ThreadJSONExportResult(folderURL: folderURL, jsonURL: jsonURL)
@@ -165,6 +172,16 @@ struct ThreadJSONExporter {
         }
         usedFilenames.insert(candidate.lowercased())
         return candidate
+    }
+
+    /// Local-date stamp (yyyy-MM-dd) for the export filename. Uses the current time zone
+    /// so the file name matches the day the user ran the export.
+    private static func fileDateStamp(from date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.string(from: date)
     }
 
     private func uniqueDirectoryURL(named name: String, in parentDirectoryURL: URL) -> URL {
@@ -255,7 +272,7 @@ private enum ThreadJSONExportAppVersion {
 
 private struct ThreadJSONV1: Encodable {
     let threadkeepVersion: String
-    let schemaVersion = 1
+    let schemaVersion = 2
     let exportedAt: String
     let source: Source
     let thread: Thread
@@ -336,17 +353,20 @@ private struct ThreadJSONV1: Encodable {
         let displayName: String
         let handles: [String]
         let isMe: Bool
+        let cnContactIdentifier: String?
 
-        init(participant: ParticipantRecord, displayName: String, handles: [String]) {
+        init(participant: ParticipantRecord, displayName: String, handles: [String], cnContactIdentifier: String?) {
             self.displayName = participant.displayName.localizedCaseInsensitiveCompare("You") == .orderedSame ? "Me" : displayName
             self.handles = handles
             isMe = participant.displayName.localizedCaseInsensitiveCompare("You") == .orderedSame || participant.id == "you"
+            self.cnContactIdentifier = cnContactIdentifier
         }
 
         enum CodingKeys: String, CodingKey {
             case displayName = "display_name"
             case handles
             case isMe = "is_me"
+            case cnContactIdentifier = "cn_contact_identifier"
         }
     }
 

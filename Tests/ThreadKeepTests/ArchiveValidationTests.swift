@@ -1574,13 +1574,25 @@ struct ArchiveValidationTests {
             exportedAt: testDate("2026-05-05T17:30:00Z")
         )
 
+        let stampFormatter = DateFormatter()
+        stampFormatter.locale = Locale(identifier: "en_US_POSIX")
+        stampFormatter.calendar = Calendar(identifier: .gregorian)
+        stampFormatter.dateFormat = "yyyy-MM-dd"
+        let expectedStamp = stampFormatter.string(from: testDate("2026-05-05T17:30:00Z"))
+        #expect(result.jsonURL.lastPathComponent.hasSuffix("-\(expectedStamp).json"))
+        #expect(result.folderURL.lastPathComponent.hasSuffix("-json"))
+
         let data = try Data(contentsOf: result.jsonURL)
         let object = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
         #expect(object["threadkeep_version"] as? String == "1.0")
-        #expect(object["schema_version"] as? Int == 1)
+        #expect(object["schema_version"] as? Int == 2)
         let messages = try #require(object["messages"] as? [[String: Any]])
         #expect(messages.count == 1)
         #expect(messages[0]["body"] as? String == "Please keep this")
+
+        let threadObject = try #require(object["thread"] as? [String: Any])
+        let participants = try #require(threadObject["participants"] as? [[String: Any]])
+        #expect(participants.allSatisfy { $0["cn_contact_identifier"] == nil })
     }
 
     private func normalizedTimestampString(for date: Date) -> String {
