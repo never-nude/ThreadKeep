@@ -48,6 +48,7 @@ struct ImportArchiveSheet: View {
     @State private var hasStartedAutomaticLookup = false
     @State private var fullDiskAccessStatus: FullDiskAccessStatus = .granted
     @State private var pendingAutoImport = false
+    @State private var hasSavedMessagesFolderAccess = false
 
     private let onImportCompleted: ((MessagesImportMode, [String]) -> Void)?
     private let authorizeImport: @MainActor () async -> Bool
@@ -125,8 +126,16 @@ struct ImportArchiveSheet: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .frame(minHeight: 620)
         .task(id: useContactsNames) {
+            refreshSavedMessagesFolderAccessState()
             refreshContactAccessState()
-            await contactsResolver.refresh(enabled: canResolveContactsForImportList)
+            await contactsResolver.refresh(
+                enabled: Self.shouldRefreshContactsOnAppearance(
+                    useContactsNames: useContactsNames,
+                    isDemoImport: isDemoImport,
+                    contactsAccessState: contactsAccessState
+                ),
+                requestAccessIfNeeded: false
+            )
             if !hasStartedAutomaticLookup {
                 hasStartedAutomaticLookup = true
             }
@@ -156,7 +165,7 @@ struct ImportArchiveSheet: View {
         .onReceive(NotificationCenter.default.publisher(for: .threadKeepContactsAccessDidChange)) { _ in
             Task { @MainActor in
                 refreshContactAccessState()
-                await contactsResolver.refresh(enabled: canResolveContactsForImportList)
+                await contactsResolver.refresh(enabled: canResolveContactsForImportList, requestAccessIfNeeded: false)
                 if let messagesFolderURL {
                     loadMessagesChats(from: messagesFolderURL, autoDetected: false)
                 }
@@ -220,15 +229,33 @@ struct ImportArchiveSheet: View {
                 .help("Scan Messages on this Mac again")
             }
 
-            if showsManualMessagesFallback {
+            if Self.shouldShowManualFolderControl(
+                fullDiskAccessStatus: fullDiskAccessStatus,
+                hasSavedMessagesFolderAccess: hasSavedMessagesFolderAccess,
+                isDemoImport: isDemoImport
+            ) {
                 Button {
                     chooseMessagesStoreManually()
                 } label: {
-                    Label("Choose Manually", systemImage: "folder")
+                    Label("Import from a Folder...", systemImage: "folder")
                 }
                 .buttonStyle(.bordered)
                 .disabled(isLoadingMessagesChats || isPreparingMessagesImport)
-                .help("Choose the Messages folder manually if automatic connection needs help")
+                .help("Choose a Messages folder without changing Full Disk Access")
+            }
+
+            if Self.shouldShowForgetSavedFolderAction(
+                hasSavedMessagesFolderAccess: hasSavedMessagesFolderAccess,
+                isDemoImport: isDemoImport
+            ) {
+                Button {
+                    forgetSavedMessagesFolderAccess()
+                } label: {
+                    Label("Forget Saved Folder", systemImage: "xmark.circle")
+                }
+                .buttonStyle(.bordered)
+                .disabled(isLoadingMessagesChats || isPreparingMessagesImport)
+                .help("Stop using the saved Messages folder bookmark for future imports")
             }
         }
     }
@@ -247,6 +274,33 @@ struct ImportArchiveSheet: View {
 
     private var canResolveContactsForImportList: Bool {
         !isDemoImport && canUseContactsForImport
+    }
+
+    static func shouldShowManualFolderControl(
+        fullDiskAccessStatus _: FullDiskAccessStatus,
+        hasSavedMessagesFolderAccess _: Bool,
+        isDemoImport: Bool
+    ) -> Bool {
+        !isDemoImport
+    }
+
+    static func shouldShowForgetSavedFolderAction(
+        hasSavedMessagesFolderAccess: Bool,
+        isDemoImport: Bool
+    ) -> Bool {
+        hasSavedMessagesFolderAccess && !isDemoImport
+    }
+
+    static func shouldRefreshContactsOnAppearance(
+        useContactsNames: Bool,
+        isDemoImport: Bool,
+        contactsAccessState: MessagesContactAccessState
+    ) -> Bool {
+        guard useContactsNames && !isDemoImport else { return false }
+        if case .authorized = contactsAccessState {
+            return true
+        }
+        return false
     }
 
     private var isDemoImport: Bool {
@@ -430,9 +484,11 @@ struct ImportArchiveSheet: View {
                             .disabled(selectedMessagesChatIDs.isEmpty || isPreparingMessagesImport)
                         }
 
-                        List {
-                            ForEach(filteredMessagesChats) { chat in
-                                chatRow(chat)
+                        ScrollView {
+                            LazyVStack(alignment: .leading, spacing: 2) {
+                                ForEach(filteredMessagesChats) { chat in
+                                    chatRow(chat)
+                                }
                             }
                         }
                         .frame(minHeight: 280, maxHeight: 380)
@@ -514,6 +570,7 @@ struct ImportArchiveSheet: View {
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
                     .fill(isSelected ? Color.accentColor.opacity(0.10) : .clear)
             )
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .buttonStyle(.plain)
         .contentShape(Rectangle())
@@ -650,7 +707,7 @@ struct ImportArchiveSheet: View {
                 Button {
                     chooseMessagesStoreManually()
                 } label: {
-                    Label("Choose Folder Manually", systemImage: "folder")
+                    Label("Import from a Folder...", systemImage: "folder")
                 }
                 .buttonStyle(.bordered)
             }
@@ -681,7 +738,7 @@ struct ImportArchiveSheet: View {
             Label("ThreadKeep needs Full Disk Access", systemImage: "lock.shield")
                 .font(.system(size: 13, weight: .semibold))
 
-            Text("macOS keeps Messages on this Mac inside a protected folder. Grant ThreadKeep Full Disk Access once and it'll automatically read your conversations every time you open the app.")
+            Text("ThreadKeep needs Full Disk Access to read Messages on this Mac automatically. You can also import from a folder without changing this setting.")
                 .font(.system(size: 12))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -702,7 +759,7 @@ struct ImportArchiveSheet: View {
                 Button {
                     chooseMessagesStoreManually()
                 } label: {
-                    Label("Choose Folder Manually", systemImage: "folder")
+                    Label("Import from a Folder...", systemImage: "folder")
                 }
                 .buttonStyle(.bordered)
                 .disabled(isLoadingMessagesChats || isPreparingMessagesImport)
@@ -718,6 +775,7 @@ struct ImportArchiveSheet: View {
     }
 
     private func chooseMessagesStoreManually() {
+        pendingAutoImport = false
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
         panel.canChooseFiles = true
@@ -762,6 +820,7 @@ struct ImportArchiveSheet: View {
 
                     if !autoDetected && !isDemoImport {
                         messagesStoreLocationResolver.rememberMessagesFolderAccess(for: folderURL)
+                        refreshSavedMessagesFolderAccessState()
                     }
                     logAutoDetect("\(autoDetected ? "Automatic" : "Manual") load succeeded from \(folderURL.path) with \(chats.count) conversations")
 
@@ -784,15 +843,18 @@ struct ImportArchiveSheet: View {
                     // Re-probe FDA in case chat.db became unreadable between the eager probe
                     // and the actual open. This catches the "Messages folder is visible but
                     // chat.db is still TCC-protected" case and surfaces the Grant FDA card.
-                    let reprobed = FullDiskAccessProbe.currentStatus()
-                    if reprobed == .denied {
-                        fullDiskAccessStatus = reprobed
-                        validationMessage = nil
-                        showsManualMessagesFallback = false
+                    if autoDetected {
+                        let reprobed = FullDiskAccessProbe.currentStatus()
+                        if reprobed == .denied {
+                            fullDiskAccessStatus = reprobed
+                            validationMessage = nil
+                            showsManualMessagesFallback = false
+                        } else {
+                            validationMessage = humanReadableAutoDetectFailure(for: error)
+                            showsManualMessagesFallback = true
+                        }
                     } else {
-                        validationMessage = autoDetected
-                            ? humanReadableAutoDetectFailure(for: error)
-                            : humanReadableManualSelectionFailure(for: error)
+                        validationMessage = humanReadableManualSelectionFailure(for: error)
                         showsManualMessagesFallback = true
                     }
                     isLoadingMessagesChats = false
@@ -818,6 +880,20 @@ struct ImportArchiveSheet: View {
                     importProgressMessage = nil
                 }
                 return
+            }
+
+            if canResolveContactsForImportList,
+               MessagesStoreImporter.currentContactAccessState(enabled: true) == .notDetermined {
+                await MainActor.run {
+                    contactsAccessState = .notDetermined
+                    contactsMessage = "Contacts is used only to show names instead of phone numbers."
+                }
+                let resolvedState = await MessagesStoreImporter.requestContactAccessIfNeeded(enabled: true)
+                await contactsResolver.refresh(enabled: canResolveContactsForImportList, requestAccessIfNeeded: false)
+                await MainActor.run {
+                    contactsAccessState = resolvedState
+                    contactsMessage = contactsMessage(for: resolvedState)
+                }
             }
 
             let importer = messagesStoreImporter
@@ -1091,12 +1167,24 @@ struct ImportArchiveSheet: View {
         contactsMessage = contactsMessage(for: contactsAccessState)
     }
 
+    private func refreshSavedMessagesFolderAccessState() {
+        hasSavedMessagesFolderAccess = messagesStoreLocationResolver.hasSavedMessagesFolderAccess()
+    }
+
+    private func forgetSavedMessagesFolderAccess() {
+        messagesStoreLocationResolver.forgetMessagesFolderAccess()
+        refreshSavedMessagesFolderAccessState()
+        resetImportState()
+        validationMessage = "Saved Messages folder forgotten. Choose a folder or scan Messages again."
+    }
+
     private func requestContactsAccess() {
         switch contactsAccessState {
         case .notDetermined:
+            contactsMessage = "Contacts is used only to show names instead of phone numbers."
             Task {
                 let newState = await MessagesStoreImporter.requestContactAccessIfNeeded(enabled: true)
-                await contactsResolver.refresh(enabled: canResolveContactsForImportList)
+                await contactsResolver.refresh(enabled: canResolveContactsForImportList, requestAccessIfNeeded: false)
                 await MainActor.run {
                     contactsAccessState = newState
                     contactsMessage = contactsMessage(for: newState)
