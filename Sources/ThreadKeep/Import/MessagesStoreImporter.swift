@@ -279,9 +279,8 @@ struct MessagesStoreImporter: Sendable {
 
                 let database = try SQLiteDatabase(
                     url: tempDBURL,
-                    flags: SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX
+                    flags: SQLITE_OPEN_READONLY | SQLITE_OPEN_FULLMUTEX
                 )
-                try database.execute("PRAGMA query_only = ON;")
 
                 let schema: MessagesStoreSchema
                 do {
