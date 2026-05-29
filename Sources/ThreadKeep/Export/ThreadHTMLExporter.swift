@@ -55,7 +55,7 @@ struct ThreadHTMLExporter {
             let sender = Self.escape(nameResolution.senderName(for: message))
             let timestamp = Self.escape(Self.displayTimestamp.string(from: message.timestamp))
             let isoTimestamp = Self.escape(ThreadExportTimestamp.iso8601(from: message.timestamp))
-            let body = Self.escape(message.bodyText)
+            let body = Self.escape(message.bodyText.replacingOccurrences(of: "\u{FFFC}", with: ""))
 
             html += """
             <article class="message \(directionClass)">

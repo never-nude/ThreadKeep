@@ -23,7 +23,7 @@ struct ThreadCSVExporter {
                 nameResolution.senderName(for: message),
                 message.isOutgoing ? "you" : "them",
                 message.isOutgoing ? "sent" : "received",
-                message.bodyText,
+                message.bodyText.replacingOccurrences(of: "\u{FFFC}", with: ""),
                 message.attachments.map(\.filename).joined(separator: ";")
             ]
             rows.append(fields.map(Self.escapeField).joined(separator: ","))

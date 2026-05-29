@@ -34,7 +34,7 @@ struct ThreadTextExporter {
             for message in group.messages {
                 let time = Self.messageTime.string(from: message.timestamp)
                 let sender = nameResolution.senderName(for: message)
-                lines.append("\(time)  \(sender): \(message.bodyText)")
+                lines.append("\(time)  \(sender): \(message.bodyText.replacingOccurrences(of: "\u{FFFC}", with: ""))")
                 for attachment in message.attachments {
                     lines.append("        [attachment: \(attachment.filename)]")
                 }
