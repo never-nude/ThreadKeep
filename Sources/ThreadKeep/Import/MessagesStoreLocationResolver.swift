@@ -58,6 +58,19 @@ struct MessagesStoreLocationResolver {
         selectedURL.hasDirectoryPath ? selectedURL : selectedURL.deletingLastPathComponent()
     }
 
+    var hasSavedMessagesFolderAccess: Bool {
+        userDefaults.data(forKey: Self.messagesFolderBookmarkDefaultsKey) != nil
+    }
+
+    /// Forgets a previously chosen Messages folder by dropping the persisted security-scoped
+    /// bookmark. A subsequent `autoDetectionResult()` no longer auto-restores that folder, so the
+    /// user can break out of an auto-resolved location and pick a different one.
+    func forgetSavedMessagesFolderAccess() {
+        guard hasSavedMessagesFolderAccess else { return }
+        userDefaults.removeObject(forKey: Self.messagesFolderBookmarkDefaultsKey)
+        log("Cleared saved Messages folder access")
+    }
+
     func rememberMessagesFolderAccess(for selectedURL: URL) {
         let folderURL = displayFolderURL(for: selectedURL)
 

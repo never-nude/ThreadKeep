@@ -911,6 +911,72 @@ struct ArchiveValidationTests {
     }
 
     @Test
+    func importSheetOffersManualFolderEntryPointInEveryAccessState() {
+        // The manual "Choose Folder" control must be reachable regardless of Full Disk Access
+        // state or whether a folder was already auto-detected / saved — not only in the denied
+        // card. This locks in the fix and fails if the entry point is re-gated behind `.denied`.
+        let accessStates: [FullDiskAccessStatus] = [
+            .granted,
+            .denied,
+            .messagesLibraryMissing,
+            .unknown(errnoValue: 1)
+        ]
+
+        for status in accessStates {
+            for hasAutoDetectedConversations in [true, false] {
+                for hasSavedMessagesFolder in [true, false] {
+                    #expect(
+                        ImportArchiveSheet.manualFolderEntryPointIsAvailable(
+                            fullDiskAccessStatus: status,
+                            hasAutoDetectedConversations: hasAutoDetectedConversations,
+                            hasSavedMessagesFolder: hasSavedMessagesFolder
+                        ),
+                        "Manual folder entry point must be available for status=\(status), chats=\(hasAutoDetectedConversations), saved=\(hasSavedMessagesFolder)"
+                    )
+                }
+            }
+        }
+    }
+
+    @Test
+    func messagesStoreLocationResolverTracksSavedFolderAccessFlag() throws {
+        let suiteName = "ThreadKeepSavedFolderFlag-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defaults.removePersistentDomain(forName: suiteName)
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let fakeHome = FileManager.default.temporaryDirectory.appendingPathComponent("ThreadKeepSavedFolderFlagHome-\(UUID().uuidString)", isDirectory: true)
+        let resolver = MessagesStoreLocationResolver(homeDirectoryURL: fakeHome, userDefaults: defaults)
+
+        #expect(resolver.hasSavedMessagesFolderAccess == false)
+        defaults.set(Data([0x01]), forKey: "threadkeep.messagesFolderBookmark")
+        #expect(resolver.hasSavedMessagesFolderAccess == true)
+    }
+
+    @Test
+    func messagesStoreLocationResolverForgetsSavedFolderAccess() throws {
+        let suiteName = "ThreadKeepForgetSavedFolder-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defaults.removePersistentDomain(forName: suiteName)
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        // Intentionally do not create the default Messages folder, so the only path to `.ready`
+        // would be an auto-restored saved bookmark.
+        let fakeHome = FileManager.default.temporaryDirectory.appendingPathComponent("ThreadKeepForgetSavedFolderHome-\(UUID().uuidString)", isDirectory: true)
+        let resolver = MessagesStoreLocationResolver(homeDirectoryURL: fakeHome, userDefaults: defaults)
+
+        defaults.set(Data([0x01, 0x02, 0x03]), forKey: "threadkeep.messagesFolderBookmark")
+        #expect(resolver.hasSavedMessagesFolderAccess == true)
+
+        resolver.forgetSavedMessagesFolderAccess()
+
+        #expect(resolver.hasSavedMessagesFolderAccess == false)
+        #expect(defaults.data(forKey: "threadkeep.messagesFolderBookmark") == nil)
+        #expect(resolver.autoDetectionResult() == .messagesFolderMissing(resolver.defaultMessagesFolderURL))
+        #expect(resolver.autoDetectedMessagesStoreURL() == nil)
+    }
+
+    @Test
     func threadDateJumpUsesFirstMessageOnOrAfterSelectedDay() throws {
         let messages = [
             makeMessage(id: "m1", text: "June opener", timestamp: "2024-06-13T09:00:00Z"),

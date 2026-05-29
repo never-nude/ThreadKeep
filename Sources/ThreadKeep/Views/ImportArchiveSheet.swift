@@ -48,6 +48,7 @@ struct ImportArchiveSheet: View {
     @State private var hasStartedAutomaticLookup = false
     @State private var fullDiskAccessStatus: FullDiskAccessStatus = .granted
     @State private var pendingAutoImport = false
+    @State private var hasSavedMessagesFolder = false
 
     private let onImportCompleted: ((MessagesImportMode, [String]) -> Void)?
     private let authorizeImport: @MainActor () async -> Bool
@@ -126,6 +127,7 @@ struct ImportArchiveSheet: View {
         .frame(minHeight: 620)
         .task(id: useContactsNames) {
             refreshContactAccessState()
+            refreshSavedFolderState()
             await contactsResolver.refresh(enabled: canResolveContactsForImportList)
             if !hasStartedAutomaticLookup {
                 hasStartedAutomaticLookup = true
@@ -220,7 +222,13 @@ struct ImportArchiveSheet: View {
                 .help("Scan Messages on this Mac again")
             }
 
-            if showsManualMessagesFallback {
+            // Always available, independent of Full Disk Access state or whether a folder was
+            // already auto-detected, so the user can point ThreadKeep at any folder at any time.
+            if Self.manualFolderEntryPointIsAvailable(
+                fullDiskAccessStatus: fullDiskAccessStatus,
+                hasAutoDetectedConversations: !messagesChats.isEmpty,
+                hasSavedMessagesFolder: hasSavedMessagesFolder
+            ) {
                 Button {
                     chooseMessagesStoreManually()
                 } label: {
@@ -228,7 +236,18 @@ struct ImportArchiveSheet: View {
                 }
                 .buttonStyle(.bordered)
                 .disabled(isLoadingMessagesChats || isPreparingMessagesImport)
-                .help("Choose the Messages folder manually if automatic connection needs help")
+                .help("Choose any Messages folder (or a folder containing chat.db) manually")
+            }
+
+            if hasSavedMessagesFolder {
+                Button {
+                    forgetSavedMessagesFolder()
+                } label: {
+                    Label("Forget Saved Folder", systemImage: "xmark.bin")
+                }
+                .buttonStyle(.bordered)
+                .disabled(isLoadingMessagesChats || isPreparingMessagesImport)
+                .help("Forget the saved Messages folder and pick a different one")
             }
         }
     }
@@ -732,6 +751,30 @@ struct ImportArchiveSheet: View {
         loadMessagesChats(from: selectedURL, autoDetected: false)
     }
 
+    /// Whether to offer the manual "Choose Folder" entry point. It is always available so the user
+    /// can override auto-detect (or a previously saved folder) at any time, regardless of Full Disk
+    /// Access state — it is no longer gated behind the denied card or a detection failure.
+    static func manualFolderEntryPointIsAvailable(
+        fullDiskAccessStatus: FullDiskAccessStatus,
+        hasAutoDetectedConversations: Bool,
+        hasSavedMessagesFolder: Bool
+    ) -> Bool {
+        true
+    }
+
+    private func refreshSavedFolderState() {
+        hasSavedMessagesFolder = messagesStoreLocationResolver.hasSavedMessagesFolderAccess
+    }
+
+    /// Forgets the saved Messages folder and rescans from scratch, so an auto-resolved folder no
+    /// longer pins the import flow and the user can choose a different one.
+    private func forgetSavedMessagesFolder() {
+        messagesStoreLocationResolver.forgetSavedMessagesFolderAccess()
+        refreshSavedFolderState()
+        logAutoDetect("Forgot saved Messages folder; rescanning")
+        connectMessagesStore()
+    }
+
     private func loadMessagesChats(from selectedURL: URL, autoDetected: Bool) {
         validationMessage = nil
         importProgressMessage = nil
@@ -762,6 +805,7 @@ struct ImportArchiveSheet: View {
 
                     if !autoDetected && !isDemoImport {
                         messagesStoreLocationResolver.rememberMessagesFolderAccess(for: folderURL)
+                        refreshSavedFolderState()
                     }
                     logAutoDetect("\(autoDetected ? "Automatic" : "Manual") load succeeded from \(folderURL.path) with \(chats.count) conversations")
 
