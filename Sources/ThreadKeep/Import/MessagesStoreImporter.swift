@@ -1,6 +1,7 @@
 @preconcurrency import Contacts
 import Foundation
 import SQLite3
+import TKArchiveDecode
 
 enum MessagesStoreImportError: LocalizedError {
     case folderNotFound
@@ -836,27 +837,15 @@ struct MessagesStoreImporter: Sendable {
     }
 
     private func legacyTypedstreamObject(from data: Data) -> Any? {
-        guard let nsUnarchiverClass = NSClassFromString("NSUnarchiver") as? NSObject.Type else {
+        // `NSUnarchiver.decodeObject` raises an Objective-C `NSException` on a malformed legacy
+        // `streamtyped` archive, which Swift cannot catch — an uncaught throw aborts the process.
+        // Route through the Obj-C shim so a single corrupt `attributedBody` row is skipped instead
+        // of crashing the whole import.
+        guard let object = TKTryUnarchive(data) else {
+            ThreadKeepLog.importer.debug("Skipping undecodable legacy attributedBody (\(data.count, privacy: .public) bytes); falling back to message.text.")
             return nil
         }
-
-        let classObject = nsUnarchiverClass as AnyObject
-        let allocSelector = NSSelectorFromString("alloc")
-        let initSelector = NSSelectorFromString("initForReadingWithData:")
-        let decodeSelector = NSSelectorFromString("decodeObject")
-        let finishSelector = NSSelectorFromString("finishDecoding")
-
-        guard let allocated = classObject.perform(allocSelector)?.takeUnretainedValue() as? NSObject,
-              let unarchiver = allocated.perform(initSelector, with: data)?.takeUnretainedValue() as? NSObject
-        else {
-            return nil
-        }
-
-        let decodedObject = unarchiver.perform(decodeSelector)?.takeUnretainedValue()
-        if unarchiver.responds(to: finishSelector) {
-            _ = unarchiver.perform(finishSelector)
-        }
-        return decodedObject
+        return object
     }
 
     private func orderedUniqueAttachments(from attachments: [ImportedAttachment]) -> [ImportedAttachment] {

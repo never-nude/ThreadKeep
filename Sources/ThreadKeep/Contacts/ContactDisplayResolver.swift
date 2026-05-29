@@ -59,9 +59,13 @@ final class ContactDisplayResolver: ObservableObject {
         _isReady = Published(initialValue: isReady)
     }
 
-    func refresh(enabled: Bool) async {
+    /// - Parameter requestAccessIfNeeded: When `true` (default) and access is undetermined, this
+    ///   triggers the system Contacts permission prompt. Pass `false` to resolve names only when
+    ///   access is already granted — e.g. on the import sheet, where prompting on appearance would
+    ///   pop the system dialog over the import controls (see `ImportArchiveSheet`).
+    func refresh(enabled: Bool, requestAccessIfNeeded: Bool = true) async {
         var accessState = MessagesStoreImporter.currentContactAccessState(enabled: enabled)
-        if accessState == .notDetermined {
+        if accessState == .notDetermined, requestAccessIfNeeded {
             accessState = await ContactAccessRequestCoordinator.shared.requestIfNeeded(enabled: enabled)
             NotificationCenter.default.post(name: .threadKeepContactsAccessDidChange, object: accessState)
         }

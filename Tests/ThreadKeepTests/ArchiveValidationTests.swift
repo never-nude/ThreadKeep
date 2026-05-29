@@ -842,6 +842,80 @@ struct ArchiveValidationTests {
     }
 
     @Test
+    func messagesStoreImportSkipsUndecodableAttributedBodyWithoutCrashing() throws {
+        let tempFolder = FileManager.default.temporaryDirectory.appendingPathComponent("ThreadKeepUndecodableAttributedBody-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: tempFolder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempFolder) }
+
+        let dbURL = tempFolder.appendingPathComponent("chat.db")
+        let database = try SQLiteDatabase(url: dbURL)
+        try database.execute(
+            """
+            CREATE TABLE chat (ROWID INTEGER PRIMARY KEY, chat_identifier TEXT, display_name TEXT, service_name TEXT);
+            CREATE TABLE message (
+                ROWID INTEGER PRIMARY KEY,
+                guid TEXT,
+                text TEXT,
+                attributedBody BLOB,
+                date INTEGER,
+                is_from_me INTEGER,
+                service TEXT,
+                handle_id INTEGER,
+                associated_message_guid TEXT
+            );
+            CREATE TABLE chat_message_join (chat_id INTEGER, message_id INTEGER);
+            CREATE TABLE handle (ROWID INTEGER PRIMARY KEY, id TEXT, uncanonicalized_id TEXT);
+            CREATE TABLE chat_handle_join (chat_id INTEGER, handle_id INTEGER);
+            INSERT INTO chat VALUES (1, '+12016029782', NULL, 'iMessage');
+            INSERT INTO handle VALUES (1, '+12016029782', '+12016029782');
+            INSERT INTO chat_handle_join VALUES (1, 1);
+            INSERT INTO message VALUES (100, 'guid-100', 'Hello from me', NULL, 60, 1, 'iMessage', 1, NULL);
+            INSERT INTO message VALUES (102, 'guid-102', 'Plain reply', NULL, 180, 0, 'iMessage', 1, NULL);
+            INSERT INTO chat_message_join VALUES (1, 100);
+            INSERT INTO chat_message_join VALUES (1, 101);
+            INSERT INTO chat_message_join VALUES (1, 102);
+            INSERT INTO chat_message_join VALUES (1, 103);
+            """
+        )
+
+        // A legacy `streamtyped` signature followed by non-UTF8 garbage. On macOS NSUnarchiver
+        // raises an Objective-C NSException while decoding this (the crash this fix targets), and
+        // the bytes are invalid UTF-8 so the importer's plain-text fallback also yields nothing —
+        // so each such row must be skipped rather than aborting the whole import.
+        var malformedBytes: [UInt8] = [0x04, 0x0b]
+        malformedBytes.append(contentsOf: Array("streamtyped".utf8))
+        malformedBytes.append(contentsOf: [0x81, 0xe8, 0x03, 0x84, 0x40, 0xff, 0xfe, 0x00, 0x84, 0x84])
+        let malformed = Data(malformedBytes)
+
+        let insert = try database.prepare(
+            """
+            INSERT INTO message (
+                ROWID, guid, text, attributedBody, date, is_from_me, service, handle_id, associated_message_guid
+            ) VALUES (?1, ?2, NULL, ?3, ?4, ?5, ?6, ?7, NULL);
+            """
+        )
+        defer { database.finalize(insert) }
+        for (rowID, date) in [(101, 120), (103, 240)] {
+            database.bind(rowID, at: 1, in: insert)
+            database.bind("guid-\(rowID)", at: 2, in: insert)
+            sqlite3_bind_blob(insert, 3, (malformed as NSData).bytes, Int32(malformed.count), unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+            database.bind(date, at: 4, in: insert)
+            database.bind(false, at: 5, in: insert)
+            database.bind("iMessage", at: 6, in: insert)
+            database.bind(1, at: 7, in: insert)
+            try database.step(insert)
+            database.reset(insert)
+        }
+
+        // Importing must not throw or abort even though two of the four rows carry undecodable
+        // legacy archives; the two undecodable, text-less rows are skipped, leaving the two
+        // plain-text messages.
+        let payload = try MessagesStoreImporter().importChat(id: 1, from: tempFolder)
+        #expect(payload.archive.messages.count == 2)
+        #expect(payload.archive.messages.map(\.bodyText) == ["Hello from me", "Plain reply"])
+    }
+
+    @Test
     func messagesStoreLocationResolverFindsMessagesFolderAutomatically() throws {
         let fakeHome = FileManager.default.temporaryDirectory.appendingPathComponent("ThreadKeepMessagesHome-\(UUID().uuidString)", isDirectory: true)
         let resolver = MessagesStoreLocationResolver(homeDirectoryURL: fakeHome)
