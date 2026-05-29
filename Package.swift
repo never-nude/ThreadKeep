@@ -10,8 +10,15 @@ let package = Package(
         .executable(name: "ThreadKeep", targets: ["ThreadKeep"])
     ],
     targets: [
+        // Tiny Objective-C shim so Swift can survive NSUnarchiver raising an NSException on a
+        // malformed legacy `attributedBody` (Swift do/try/catch cannot catch Obj-C exceptions).
+        .target(
+            name: "TKArchiveDecode",
+            path: "Sources/TKArchiveDecode"
+        ),
         .executableTarget(
             name: "ThreadKeep",
+            dependencies: ["TKArchiveDecode"],
             path: "Sources/ThreadKeep",
             exclude: [
                 "Support",

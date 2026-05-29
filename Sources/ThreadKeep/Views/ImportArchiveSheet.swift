@@ -126,7 +126,10 @@ struct ImportArchiveSheet: View {
         .frame(minHeight: 620)
         .task(id: useContactsNames) {
             refreshContactAccessState()
-            await contactsResolver.refresh(enabled: canResolveContactsForImportList)
+            // Don't request Contacts access on appearance — the system permission dialog would
+            // cover the import controls (notably "Choose Folder Manually"). Access is requested
+            // lazily at import time in importSelectedMessagesChats().
+            await contactsResolver.refresh(enabled: canResolveContactsForImportList, requestAccessIfNeeded: false)
             if !hasStartedAutomaticLookup {
                 hasStartedAutomaticLookup = true
             }
@@ -156,7 +159,9 @@ struct ImportArchiveSheet: View {
         .onReceive(NotificationCenter.default.publisher(for: .threadKeepContactsAccessDidChange)) { _ in
             Task { @MainActor in
                 refreshContactAccessState()
-                await contactsResolver.refresh(enabled: canResolveContactsForImportList)
+                // Access has already been resolved by whoever posted this notification, so just
+                // load names from the (now-authorized) store without re-prompting.
+                await contactsResolver.refresh(enabled: canResolveContactsForImportList, requestAccessIfNeeded: false)
                 if let messagesFolderURL {
                     loadMessagesChats(from: messagesFolderURL, autoDetected: false)
                 }
@@ -430,9 +435,11 @@ struct ImportArchiveSheet: View {
                             .disabled(selectedMessagesChatIDs.isEmpty || isPreparingMessagesImport)
                         }
 
-                        List {
-                            ForEach(filteredMessagesChats) { chat in
-                                chatRow(chat)
+                        ScrollView {
+                            LazyVStack(alignment: .leading, spacing: 2) {
+                                ForEach(filteredMessagesChats) { chat in
+                                    chatRow(chat)
+                                }
                             }
                         }
                         .frame(minHeight: 280, maxHeight: 380)
@@ -818,6 +825,19 @@ struct ImportArchiveSheet: View {
                     importProgressMessage = nil
                 }
                 return
+            }
+
+            // Request Contacts access lazily — only now that the user has chosen a source and
+            // committed to importing with "Use contact names" on. Prompting earlier (on sheet
+            // appearance) would cover the import controls with the system permission dialog.
+            if canResolveContactsForImportList,
+               MessagesStoreImporter.currentContactAccessState(enabled: true) == .notDetermined {
+                let resolvedState = await MessagesStoreImporter.requestContactAccessIfNeeded(enabled: true)
+                contactsAccessState = resolvedState
+                contactsMessage = contactsMessage(for: resolvedState)
+                if resolvedState == .authorized {
+                    await contactsResolver.refresh(enabled: canResolveContactsForImportList, requestAccessIfNeeded: false)
+                }
             }
 
             let importer = messagesStoreImporter
