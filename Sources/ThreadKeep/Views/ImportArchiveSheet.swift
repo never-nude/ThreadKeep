@@ -628,6 +628,7 @@ struct ImportArchiveSheet: View {
             logAutoDetect("Skipping automatic Messages lookup — Full Disk Access is denied")
             validationMessage = nil
             showsManualMessagesFallback = false
+            refreshSavedFolderState()
             return
         }
 
@@ -642,6 +643,10 @@ struct ImportArchiveSheet: View {
             validationMessage = "Messages doesn’t look ready on this Mac yet. Open Messages once and let it load, then try again. If needed, you can choose the Messages folder manually."
             showsManualMessagesFallback = true
         }
+
+        // `autoDetectionResult()` may silently drop a broken/stale bookmark from UserDefaults, so
+        // re-sync the saved-folder flag here to keep the "Forget Saved Folder" affordance honest.
+        refreshSavedFolderState()
     }
 
     private var fetchMessagesCard: some View {
