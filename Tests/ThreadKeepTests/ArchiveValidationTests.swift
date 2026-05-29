@@ -911,6 +911,69 @@ struct ArchiveValidationTests {
     }
 
     @Test
+    func messagesStoreLocationResolverForgetsSavedMessagesFolderAccess() throws {
+        let fakeHome = FileManager.default.temporaryDirectory.appendingPathComponent("ThreadKeepMessagesForgottenAccess-\(UUID().uuidString)", isDirectory: true)
+        let defaultsSuiteName = "ThreadKeepMessagesForgottenAccess-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: defaultsSuiteName))
+        defaults.removePersistentDomain(forName: defaultsSuiteName)
+        defer { defaults.removePersistentDomain(forName: defaultsSuiteName) }
+        defer { try? FileManager.default.removeItem(at: fakeHome) }
+
+        let defaultMessagesFolder = fakeHome.appendingPathComponent("Library/Messages", isDirectory: true)
+        let customMessagesFolder = fakeHome.appendingPathComponent("CustomMessages", isDirectory: true)
+        try FileManager.default.createDirectory(at: defaultMessagesFolder, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: customMessagesFolder, withIntermediateDirectories: true)
+
+        let resolver = MessagesStoreLocationResolver(homeDirectoryURL: fakeHome, userDefaults: defaults)
+        resolver.rememberMessagesFolderAccess(for: customMessagesFolder)
+
+        #expect(resolver.hasSavedMessagesFolderAccess())
+        let restoredCustomFolder = try #require(resolver.autoDetectedMessagesStoreURL()).resolvingSymlinksInPath()
+        #expect(restoredCustomFolder == customMessagesFolder.resolvingSymlinksInPath())
+
+        resolver.forgetMessagesFolderAccess()
+
+        #expect(!resolver.hasSavedMessagesFolderAccess())
+        #expect(resolver.autoDetectionResult() == .ready(defaultMessagesFolder))
+    }
+
+    @Test
+    @MainActor
+    func importArchiveSheetShowsManualFolderControlAcrossFullDiskAccessStates() {
+        let statuses: [FullDiskAccessStatus] = [
+            .granted,
+            .denied,
+            .messagesLibraryMissing,
+            .unknown(errnoValue: 5)
+        ]
+
+        for status in statuses {
+            #expect(ImportArchiveSheet.shouldShowManualFolderControl(fullDiskAccessStatus: status, hasSavedMessagesFolderAccess: false, isDemoImport: false))
+            #expect(ImportArchiveSheet.shouldShowManualFolderControl(fullDiskAccessStatus: status, hasSavedMessagesFolderAccess: true, isDemoImport: false))
+        }
+
+        #expect(!ImportArchiveSheet.shouldShowManualFolderControl(fullDiskAccessStatus: .granted, hasSavedMessagesFolderAccess: true, isDemoImport: true))
+    }
+
+    @Test
+    @MainActor
+    func importArchiveSheetShowsForgetSavedFolderOnlyWhenBookmarkExists() {
+        #expect(ImportArchiveSheet.shouldShowForgetSavedFolderAction(hasSavedMessagesFolderAccess: true, isDemoImport: false))
+        #expect(!ImportArchiveSheet.shouldShowForgetSavedFolderAction(hasSavedMessagesFolderAccess: false, isDemoImport: false))
+        #expect(!ImportArchiveSheet.shouldShowForgetSavedFolderAction(hasSavedMessagesFolderAccess: true, isDemoImport: true))
+    }
+
+    @Test
+    @MainActor
+    func importArchiveSheetDoesNotRequestContactsOnAppearanceUnlessAlreadyAuthorized() {
+        #expect(!ImportArchiveSheet.shouldRefreshContactsOnAppearance(useContactsNames: true, isDemoImport: false, contactsAccessState: .notDetermined))
+        #expect(!ImportArchiveSheet.shouldRefreshContactsOnAppearance(useContactsNames: true, isDemoImport: false, contactsAccessState: .denied))
+        #expect(!ImportArchiveSheet.shouldRefreshContactsOnAppearance(useContactsNames: false, isDemoImport: false, contactsAccessState: .authorized))
+        #expect(!ImportArchiveSheet.shouldRefreshContactsOnAppearance(useContactsNames: true, isDemoImport: true, contactsAccessState: .authorized))
+        #expect(ImportArchiveSheet.shouldRefreshContactsOnAppearance(useContactsNames: true, isDemoImport: false, contactsAccessState: .authorized))
+    }
+
+    @Test
     func threadDateJumpUsesFirstMessageOnOrAfterSelectedDay() throws {
         let messages = [
             makeMessage(id: "m1", text: "June opener", timestamp: "2024-06-13T09:00:00Z"),

@@ -59,9 +59,9 @@ final class ContactDisplayResolver: ObservableObject {
         _isReady = Published(initialValue: isReady)
     }
 
-    func refresh(enabled: Bool) async {
+    func refresh(enabled: Bool, requestAccessIfNeeded: Bool = true) async {
         var accessState = MessagesStoreImporter.currentContactAccessState(enabled: enabled)
-        if accessState == .notDetermined {
+        if accessState == .notDetermined && requestAccessIfNeeded {
             accessState = await ContactAccessRequestCoordinator.shared.requestIfNeeded(enabled: enabled)
             NotificationCenter.default.post(name: .threadKeepContactsAccessDidChange, object: accessState)
         }

@@ -74,6 +74,15 @@ struct MessagesStoreLocationResolver {
         }
     }
 
+    func hasSavedMessagesFolderAccess() -> Bool {
+        userDefaults.data(forKey: Self.messagesFolderBookmarkDefaultsKey) != nil
+    }
+
+    func forgetMessagesFolderAccess() {
+        userDefaults.removeObject(forKey: Self.messagesFolderBookmarkDefaultsKey)
+        log("Forgot saved Messages folder access")
+    }
+
     private func restoredMessagesFolderURL() -> URL? {
         guard let bookmarkData = userDefaults.data(forKey: Self.messagesFolderBookmarkDefaultsKey) else {
             return nil
