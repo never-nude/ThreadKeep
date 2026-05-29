@@ -562,6 +562,60 @@ struct ArchiveValidationTests {
     }
 
     @Test
+    func messagesStoreImportSkipsUndecodableAttributedBodyWithoutCrashing() throws {
+        // Mirrors the `01_diagnostics/01_attributedbody` fixture: 4 messages, 2 of which carry a
+        // legacy `streamtyped` attributedBody archive that NSUnarchiver cannot decode (it raises
+        // an Obj-C NSException). Before the TKTryUnarchive fix this aborted the whole import; now
+        // the two undecodable rows must be skipped and the two plain-text rows imported.
+        let tempFolder = FileManager.default.temporaryDirectory.appendingPathComponent("ThreadKeepAttributedBodyCrash-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: tempFolder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempFolder) }
+
+        let dbURL = tempFolder.appendingPathComponent("chat.db")
+        let database = try SQLiteDatabase(url: dbURL)
+        // A valid `streamtyped` signature followed by a truncated, non-UTF-8 body: NSUnarchiver
+        // recognizes the typedstream header and then throws while decoding the corrupt remainder.
+        let malformedBlobHex = "040b73747265616d747970656481e803"
+        try database.execute(
+            """
+            CREATE TABLE chat (ROWID INTEGER PRIMARY KEY, chat_identifier TEXT, display_name TEXT, service_name TEXT);
+            CREATE TABLE message (
+                ROWID INTEGER PRIMARY KEY,
+                guid TEXT,
+                text TEXT,
+                attributedBody BLOB,
+                date INTEGER,
+                is_from_me INTEGER,
+                service TEXT,
+                handle_id INTEGER,
+                associated_message_guid TEXT
+            );
+            CREATE TABLE chat_message_join (chat_id INTEGER, message_id INTEGER);
+            CREATE TABLE handle (ROWID INTEGER PRIMARY KEY, id TEXT, uncanonicalized_id TEXT);
+            CREATE TABLE chat_handle_join (chat_id INTEGER, handle_id INTEGER);
+            INSERT INTO chat VALUES (1, 'pat@example.com', NULL, 'iMessage');
+            INSERT INTO handle VALUES (1, 'pat@example.com', 'Pat');
+            INSERT INTO chat_handle_join VALUES (1, 1);
+            INSERT INTO message VALUES (100, 'guid-100', 'First good message', NULL, 60, 1, 'iMessage', 1, NULL);
+            INSERT INTO message VALUES (101, 'guid-101', NULL, X'\(malformedBlobHex)', 120, 0, 'iMessage', 1, NULL);
+            INSERT INTO message VALUES (102, 'guid-102', 'Second good message', NULL, 180, 0, 'iMessage', 1, NULL);
+            INSERT INTO message VALUES (103, 'guid-103', NULL, X'\(malformedBlobHex)', 240, 0, 'iMessage', 1, NULL);
+            INSERT INTO chat_message_join VALUES (1, 100);
+            INSERT INTO chat_message_join VALUES (1, 101);
+            INSERT INTO chat_message_join VALUES (1, 102);
+            INSERT INTO chat_message_join VALUES (1, 103);
+            """
+        )
+
+        let importer = MessagesStoreImporter()
+        // Must not throw or abort even though two rows carry undecodable attributedBody blobs.
+        let payload = try importer.importChat(id: 1, from: tempFolder)
+
+        #expect(payload.archive.messages.count == 2)
+        #expect(payload.archive.messages.map(\.bodyText) == ["First good message", "Second good message"])
+    }
+
+    @Test
     func messagesStoreChatCandidatesUseRenderableMessageDateRange() throws {
         let tempFolder = FileManager.default.temporaryDirectory.appendingPathComponent("ThreadKeepMessagesStoreRenderableRange-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: tempFolder, withIntermediateDirectories: true)

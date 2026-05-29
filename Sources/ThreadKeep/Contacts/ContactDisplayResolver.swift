@@ -59,9 +59,12 @@ final class ContactDisplayResolver: ObservableObject {
         _isReady = Published(initialValue: isReady)
     }
 
-    func refresh(enabled: Bool) async {
+    func refresh(enabled: Bool, requestAccessIfNeeded: Bool = true) async {
         var accessState = MessagesStoreImporter.currentContactAccessState(enabled: enabled)
-        if accessState == .notDetermined {
+        // When `requestAccessIfNeeded` is false (e.g. the import sheet on appearance) we read the
+        // current status without showing the system permission dialog; a `.notDetermined` state
+        // then falls through below as not-yet-authorized until an explicit request is made.
+        if accessState == .notDetermined, requestAccessIfNeeded {
             accessState = await ContactAccessRequestCoordinator.shared.requestIfNeeded(enabled: enabled)
             NotificationCenter.default.post(name: .threadKeepContactsAccessDidChange, object: accessState)
         }

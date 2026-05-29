@@ -126,7 +126,10 @@ struct ImportArchiveSheet: View {
         .frame(minHeight: 620)
         .task(id: useContactsNames) {
             refreshContactAccessState()
-            await contactsResolver.refresh(enabled: canResolveContactsForImportList)
+            // Don't prompt for Contacts access while the sheet is on screen — that dialog
+            // covers "Choose Folder Manually". Access is requested lazily later (the explicit
+            // "Use contacts" button, or at the point of import).
+            await contactsResolver.refresh(enabled: canResolveContactsForImportList, requestAccessIfNeeded: false)
             if !hasStartedAutomaticLookup {
                 hasStartedAutomaticLookup = true
             }
@@ -156,7 +159,7 @@ struct ImportArchiveSheet: View {
         .onReceive(NotificationCenter.default.publisher(for: .threadKeepContactsAccessDidChange)) { _ in
             Task { @MainActor in
                 refreshContactAccessState()
-                await contactsResolver.refresh(enabled: canResolveContactsForImportList)
+                await contactsResolver.refresh(enabled: canResolveContactsForImportList, requestAccessIfNeeded: false)
                 if let messagesFolderURL {
                     loadMessagesChats(from: messagesFolderURL, autoDetected: false)
                 }
@@ -430,17 +433,21 @@ struct ImportArchiveSheet: View {
                             .disabled(selectedMessagesChatIDs.isEmpty || isPreparingMessagesImport)
                         }
 
-                        List {
-                            ForEach(filteredMessagesChats) { chat in
-                                chatRow(chat)
-                            }
-                        }
-                        .frame(minHeight: 280, maxHeight: 380)
-
                         if filteredMessagesChats.isEmpty {
+                            // Render only the empty-state text; an empty List draws stray
+                            // placeholder separator rows ("gray strips") on macOS.
                             Text("No conversations found. Try a different name, number, or date.")
                                 .font(.system(size: 11))
                                 .foregroundStyle(.secondary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.vertical, 8)
+                        } else {
+                            List {
+                                ForEach(filteredMessagesChats) { chat in
+                                    chatRow(chat)
+                                }
+                            }
+                            .frame(minHeight: 280, maxHeight: 380)
                         }
 
                         HStack {
@@ -818,6 +825,18 @@ struct ImportArchiveSheet: View {
                     importProgressMessage = nil
                 }
                 return
+            }
+
+            // Request Contacts access lazily — only now that the user has chosen a source and
+            // confirmed an import with "Use contact names" enabled. We intentionally avoid
+            // prompting on sheet appearance so the manual-folder / denied-FDA paths stay usable.
+            if canResolveContactsForImportList, contactsAccessState == .notDetermined {
+                let newState = await MessagesStoreImporter.requestContactAccessIfNeeded(enabled: true)
+                await contactsResolver.refresh(enabled: canResolveContactsForImportList)
+                await MainActor.run {
+                    contactsAccessState = newState
+                    contactsMessage = contactsMessage(for: newState)
+                }
             }
 
             let importer = messagesStoreImporter
