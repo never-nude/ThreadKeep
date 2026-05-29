@@ -70,7 +70,8 @@ struct ImportArchiveSheet: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
+        ScrollView(.vertical) {
+            VStack(alignment: .leading, spacing: 20) {
             header
             statusRow
 
@@ -113,18 +114,18 @@ struct ImportArchiveSheet: View {
 
             messagesStoreCard
 
-            Spacer()
-
-            HStack {
-                Button("Cancel") {
-                    closeImportFlow()
+                HStack {
+                    Button("Cancel") {
+                        closeImportFlow()
+                    }
+                    Spacer()
                 }
-                Spacer()
             }
+            .padding(24)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
         }
-        .padding(24)
+        .scrollIndicators(.visible)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .frame(minHeight: 620)
         .task(id: useContactsNames) {
             refreshSavedMessagesFolderAccessState()
             refreshContactAccessState()
