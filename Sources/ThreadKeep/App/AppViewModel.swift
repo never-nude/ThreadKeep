@@ -64,6 +64,9 @@ final class AppViewModel: ObservableObject {
     let store: ArchiveStore
     private let pdfExporter: ThreadPDFExporter
     private let jsonExporter: ThreadJSONExporter
+    private let csvExporter: ThreadCSVExporter
+    private let txtExporter: ThreadTextExporter
+    private let htmlExporter: ThreadHTMLExporter
     private let demoLibrarySeedProvider: DemoLibrarySeedProvider?
     private let pdfContactsResolver = ContactDisplayResolver()
     private let libraryContactsResolver = ContactDisplayResolver()
@@ -82,11 +85,17 @@ final class AppViewModel: ObservableObject {
         store: ArchiveStore,
         pdfExporter: ThreadPDFExporter = ThreadPDFExporter(),
         jsonExporter: ThreadJSONExporter = ThreadJSONExporter(),
+        csvExporter: ThreadCSVExporter = ThreadCSVExporter(),
+        txtExporter: ThreadTextExporter = ThreadTextExporter(),
+        htmlExporter: ThreadHTMLExporter = ThreadHTMLExporter(),
         demoLibrarySeedProvider: DemoLibrarySeedProvider? = nil
     ) {
         self.store = store
         self.pdfExporter = pdfExporter
         self.jsonExporter = jsonExporter
+        self.csvExporter = csvExporter
+        self.txtExporter = txtExporter
+        self.htmlExporter = htmlExporter
         self.demoLibrarySeedProvider = demoLibrarySeedProvider
     }
 
@@ -517,6 +526,81 @@ final class AppViewModel: ObservableObject {
         } catch {
             showActivityStatus(nil)
             present(error: error, title: "JSON Export Failed")
+        }
+    }
+
+    func exportSelectedThreadCSV() async {
+        guard let thread = selectedThread else { return }
+
+        NSApp.activate(ignoringOtherApps: true)
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.commaSeparatedText]
+        panel.nameFieldStringValue = csvExporter.suggestedFilename(for: thread)
+        panel.directoryURL = defaultSaveDirectoryURL
+
+        guard panel.runModal() == .OK, let destinationURL = panel.url else { return }
+
+        isBusy = true
+        defer { isBusy = false }
+
+        do {
+            let resolution = await jsonNameResolution(for: thread)
+            let content = csvExporter.export(thread: thread, nameResolution: resolution)
+            try Data(content.utf8).write(to: destinationURL, options: .atomic)
+            statusMessage = "Saved a CSV transcript as \(destinationURL.lastPathComponent)."
+            showActivityStatus(statusMessage, autoDismissAfter: 4)
+        } catch {
+            present(error: error, title: "Export Failed")
+        }
+    }
+
+    func exportSelectedThreadText() async {
+        guard let thread = selectedThread else { return }
+
+        NSApp.activate(ignoringOtherApps: true)
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.plainText]
+        panel.nameFieldStringValue = txtExporter.suggestedFilename(for: thread)
+        panel.directoryURL = defaultSaveDirectoryURL
+
+        guard panel.runModal() == .OK, let destinationURL = panel.url else { return }
+
+        isBusy = true
+        defer { isBusy = false }
+
+        do {
+            let resolution = await jsonNameResolution(for: thread)
+            let content = txtExporter.export(thread: thread, nameResolution: resolution)
+            try Data(content.utf8).write(to: destinationURL, options: .atomic)
+            statusMessage = "Saved a plain-text transcript as \(destinationURL.lastPathComponent)."
+            showActivityStatus(statusMessage, autoDismissAfter: 4)
+        } catch {
+            present(error: error, title: "Export Failed")
+        }
+    }
+
+    func exportSelectedThreadHTML() async {
+        guard let thread = selectedThread else { return }
+
+        NSApp.activate(ignoringOtherApps: true)
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.html]
+        panel.nameFieldStringValue = htmlExporter.suggestedFilename(for: thread)
+        panel.directoryURL = defaultSaveDirectoryURL
+
+        guard panel.runModal() == .OK, let destinationURL = panel.url else { return }
+
+        isBusy = true
+        defer { isBusy = false }
+
+        do {
+            let resolution = await jsonNameResolution(for: thread)
+            let content = htmlExporter.export(thread: thread, nameResolution: resolution)
+            try Data(content.utf8).write(to: destinationURL, options: .atomic)
+            statusMessage = "Saved an HTML transcript as \(destinationURL.lastPathComponent)."
+            showActivityStatus(statusMessage, autoDismissAfter: 4)
+        } catch {
+            present(error: error, title: "Export Failed")
         }
     }
 

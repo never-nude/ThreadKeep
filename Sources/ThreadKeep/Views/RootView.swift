@@ -160,6 +160,21 @@ struct RootView: View {
                     }
                     .disabled(viewModel.selectedThread == nil)
 
+                    Button("Export CSV") {
+                        Task { await viewModel.exportSelectedThreadCSV() }
+                    }
+                    .disabled(viewModel.selectedThread == nil)
+
+                    Button("Export Text") {
+                        Task { await viewModel.exportSelectedThreadText() }
+                    }
+                    .disabled(viewModel.selectedThread == nil)
+
+                    Button("Export HTML") {
+                        Task { await viewModel.exportSelectedThreadHTML() }
+                    }
+                    .disabled(viewModel.selectedThread == nil)
+
                     Divider()
 
                     Button("Export Library as JSON") {
