@@ -470,7 +470,9 @@ struct ThreadDetail: Identifiable, Sendable {
     var groupedMessages: [ConversationDayGroup] {
         Dictionary(grouping: messages) { Calendar.current.startOfDay(for: $0.timestamp) }
             .sorted { $0.key < $1.key }
-            .map { ConversationDayGroup(date: $0.key, messages: $0.value.sorted { $0.timestamp < $1.timestamp }) }
+            .map { ConversationDayGroup(date: $0.key, messages: $0.value.sorted { lhs, rhs in
+                (lhs.timestamp, lhs.id) < (rhs.timestamp, rhs.id)
+            }) }
     }
 
     var allAttachments: [AttachmentRecord] {
