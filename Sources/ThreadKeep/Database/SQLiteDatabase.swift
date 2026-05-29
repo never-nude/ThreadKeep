@@ -27,6 +27,8 @@ final class SQLiteDatabase {
             throw SQLiteDatabaseError.openFailed("Could not open database at `\(url.path)`: \(message)")
         }
 
+        sqlite3_busy_timeout(handle, 5000) // 5s — retry instead of failing immediately when the db is briefly locked
+
         if flags & SQLITE_OPEN_READWRITE != 0 || flags & SQLITE_OPEN_CREATE != 0 {
             try execute("PRAGMA foreign_keys = ON;")
             try execute("PRAGMA journal_mode = WAL;")
