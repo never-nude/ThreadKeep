@@ -1627,6 +1627,185 @@ struct ArchiveValidationTests {
         #expect(orderedIDs == ["m1", "m2", "m3"])
     }
 
+    @Test
+    func csvExportPreservesCountOrderAndSenders() throws {
+        let thread = makeExportSampleThread()
+        let csv = ThreadCSVExporter().export(thread: thread, nameResolution: exportSampleResolution())
+
+        let rows = parseCSV(csv)
+        let header = try #require(rows.first)
+        #expect(header == ["timestamp", "sender", "direction", "type", "text", "attachments"])
+
+        let dataRows = Array(rows.dropFirst())
+        #expect(dataRows.count == 3)
+        #expect(dataRows.map { $0[1] } == ["Sam", "Me", "Sam"])
+        #expect(dataRows.map { $0[2] } == ["them", "you", "them"])
+
+        let timestamps = dataRows.map { $0[0] }
+        #expect(timestamps == timestamps.sorted())
+        #expect(timestamps == [
+            "2024-03-01T09:00:00Z",
+            "2024-03-01T09:00:30Z",
+            "2024-03-01T09:01:00Z"
+        ])
+
+        // Quoting/escaping round-trips for comma + embedded newline + filename column.
+        #expect(dataRows[0][4] == "Hey, did you, see this?")
+        #expect(dataRows[2][4] == "line1\nline2")
+        #expect(dataRows[1][5] == "photo.jpg")
+    }
+
+    @Test
+    func textExportPreservesCountOrderAndSenders() throws {
+        let thread = makeExportSampleThread()
+        let txt = ThreadTextExporter().export(thread: thread, nameResolution: exportSampleResolution())
+
+        let messageLines = txt
+            .split(separator: "\n", omittingEmptySubsequences: false)
+            .map(String.init)
+            .filter { $0.range(of: #"^\d{2}:\d{2}  "#, options: .regularExpression) != nil }
+
+        #expect(messageLines.count == 3)
+
+        let senders = messageLines.map { line -> String in
+            let afterTime = String(line.dropFirst(7)) // "HH:mm" + two spaces
+            return String(afterTime.prefix(while: { $0 != ":" }))
+        }
+        #expect(senders == ["Sam", "Me", "Sam"])
+        #expect(txt.contains("[attachment: photo.jpg]"))
+    }
+
+    @Test
+    func htmlExportPreservesCountOrderAndSenders() throws {
+        let thread = makeExportSampleThread()
+        let html = ThreadHTMLExporter().export(thread: thread, nameResolution: exportSampleResolution())
+
+        #expect(html.hasPrefix("<!DOCTYPE html>"))
+
+        let senders = matches(in: html, pattern: #"<span class="sender">([^<]+)</span>"#)
+        #expect(senders.count == 3)
+        #expect(senders == ["Sam", "Me", "Sam"])
+        #expect(html.contains("<li>photo.jpg</li>"))
+    }
+
+    private func makeExportSampleThread() -> ThreadDetail {
+        ThreadDetail(
+            id: "thread-export",
+            title: "Sam",
+            participants: [
+                ParticipantRecord(id: "you", displayName: "You"),
+                ParticipantRecord(id: "sam", displayName: "Sam")
+            ],
+            messages: [
+                makeExportMessage(id: "m1", text: "Hey, did you, see this?", timestamp: "2024-03-01T09:00:00Z", senderID: "sam", senderDisplayName: "Sam", isOutgoing: false),
+                makeExportMessage(id: "m2", text: "Yes—\"wild\"", timestamp: "2024-03-01T09:00:30Z", senderID: "you", senderDisplayName: "You", isOutgoing: true, attachmentFilenames: ["photo.jpg"]),
+                makeExportMessage(id: "m3", text: "line1\nline2", timestamp: "2024-03-01T09:01:00Z", senderID: "sam", senderDisplayName: "Sam", isOutgoing: false)
+            ],
+            statistics: ConversationStatistics(
+                totalMessages: 3,
+                outgoingMessages: 1,
+                incomingMessages: 2,
+                attachmentMessages: 1,
+                monthlyBuckets: []
+            ),
+            rawArchivePath: nil,
+            importedAt: Date(),
+            importSourceKind: .jsonArchive
+        )
+    }
+
+    private func exportSampleResolution() -> ThreadJSONNameResolution {
+        ThreadJSONNameResolution(
+            threadTitle: "Sam",
+            participantNamesByID: ["you": "Me", "sam": "Sam"],
+            senderNamesByID: ["you": "Me", "sam": "Sam"]
+        )
+    }
+
+    private func makeExportMessage(
+        id: String,
+        text: String,
+        timestamp: String,
+        senderID: String,
+        senderDisplayName: String,
+        isOutgoing: Bool,
+        attachmentFilenames: [String] = []
+    ) -> MessageRecord {
+        MessageRecord(
+            id: id,
+            threadID: "thread-export",
+            senderID: senderID,
+            senderDisplayName: senderDisplayName,
+            isOutgoing: isOutgoing,
+            bodyText: text,
+            timestamp: ISO8601DateFormatter().date(from: timestamp)!,
+            service: .iMessage,
+            attachments: attachmentFilenames.map { filename in
+                AttachmentRecord(id: "att-\(filename)", type: .image, filename: filename, localPath: nil, mimeType: nil, thumbnail: nil, url: nil)
+            },
+            replyToMessageID: nil,
+            reactions: [],
+            metadataJSON: nil
+        )
+    }
+
+    private func matches(in text: String, pattern: String) -> [String] {
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
+        let range = NSRange(text.startIndex..., in: text)
+        return regex.matches(in: text, range: range).compactMap { match in
+            guard match.numberOfRanges > 1, let range = Range(match.range(at: 1), in: text) else { return nil }
+            return String(text[range])
+        }
+    }
+
+    /// Minimal RFC 4180 parser used to validate CSV quoting/escaping in tests.
+    private func parseCSV(_ text: String) -> [[String]] {
+        var rows: [[String]] = []
+        var field = ""
+        var record: [String] = []
+        var inQuotes = false
+        let chars = Array(text)
+        var i = 0
+        while i < chars.count {
+            let c = chars[i]
+            if inQuotes {
+                if c == "\"" {
+                    if i + 1 < chars.count, chars[i + 1] == "\"" {
+                        field.append("\"")
+                        i += 1
+                    } else {
+                        inQuotes = false
+                    }
+                } else {
+                    field.append(c)
+                }
+            } else {
+                switch c {
+                case "\"":
+                    inQuotes = true
+                case ",":
+                    record.append(field)
+                    field = ""
+                case "\n":
+                    record.append(field)
+                    field = ""
+                    rows.append(record)
+                    record = []
+                case "\r":
+                    break
+                default:
+                    field.append(c)
+                }
+            }
+            i += 1
+        }
+        if !field.isEmpty || !record.isEmpty {
+            record.append(field)
+            rows.append(record)
+        }
+        return rows
+    }
+
     private func normalizedTimestampString(for date: Date) -> String {
         AppFormatters.preciseMessageTimestamp
             .string(from: date)
