@@ -637,11 +637,7 @@ private struct MessageBubbleView: View {
             }
 
             if !message.attachments.isEmpty {
-                VStack(alignment: .leading, spacing: 6) {
-                    ForEach(message.attachments) { attachment in
-                        AttachmentCardView(attachment: attachment, compact: false)
-                    }
-                }
+                AttachmentStripView(attachments: message.attachments)
             }
 
             if !message.reactions.isEmpty {
@@ -725,27 +721,161 @@ private struct HighlightedMessageTextView: View {
     }
 }
 
+private struct AttachmentStripView: View {
+    let attachments: [AttachmentRecord]
+
+    var body: some View {
+        AttachmentWrappingLayout(horizontalSpacing: 6, verticalSpacing: 6) {
+            ForEach(attachments) { attachment in
+                AttachmentCardView(attachment: attachment, compact: true)
+            }
+        }
+    }
+}
+
+private struct AttachmentWrappingLayout: Layout {
+    let horizontalSpacing: CGFloat
+    let verticalSpacing: CGFloat
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        measuredRows(for: subviews, proposalWidth: proposal.width).size
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let arrangement = measuredRows(for: subviews, proposalWidth: bounds.width)
+        var y = bounds.minY
+
+        for row in arrangement.rows {
+            var x = bounds.minX
+            for item in row.items {
+                let itemY = y + ((row.height - item.size.height) / 2)
+                subviews[item.index].place(
+                    at: CGPoint(x: x, y: itemY),
+                    anchor: .topLeading,
+                    proposal: ProposedViewSize(width: item.size.width, height: item.size.height)
+                )
+                x += item.size.width + horizontalSpacing
+            }
+            y += row.height + verticalSpacing
+        }
+    }
+
+    private func measuredRows(for subviews: Subviews, proposalWidth: CGFloat?) -> (rows: [AttachmentLayoutRow], size: CGSize) {
+        let availableWidth = proposalWidth.map { max(0, $0) } ?? .greatestFiniteMagnitude
+        var rows: [AttachmentLayoutRow] = []
+        var currentRow = AttachmentLayoutRow()
+
+        for index in subviews.indices {
+            let size = subviews[index].sizeThatFits(.unspecified)
+            let nextWidth = currentRow.items.isEmpty
+                ? size.width
+                : currentRow.width + horizontalSpacing + size.width
+
+            if !currentRow.items.isEmpty && nextWidth > availableWidth {
+                rows.append(currentRow)
+                currentRow = AttachmentLayoutRow()
+            }
+
+            if !currentRow.items.isEmpty {
+                currentRow.width += horizontalSpacing
+            }
+            currentRow.items.append(AttachmentLayoutItem(index: index, size: size))
+            currentRow.width += size.width
+            currentRow.height = max(currentRow.height, size.height)
+        }
+
+        if !currentRow.items.isEmpty {
+            rows.append(currentRow)
+        }
+
+        let contentWidth = rows.map(\.width).max() ?? 0
+        let contentHeight = rows.enumerated().reduce(CGFloat.zero) { total, row in
+            total + row.element.height + (row.offset == rows.count - 1 ? 0 : verticalSpacing)
+        }
+        let width = availableWidth.isFinite ? min(contentWidth, availableWidth) : contentWidth
+
+        return (rows, CGSize(width: width, height: contentHeight))
+    }
+}
+
+private struct AttachmentLayoutRow {
+    var items: [AttachmentLayoutItem] = []
+    var width: CGFloat = 0
+    var height: CGFloat = 0
+}
+
+private struct AttachmentLayoutItem {
+    let index: Int
+    let size: CGSize
+}
+
 private struct AttachmentCardView: View {
     let attachment: AttachmentRecord
     let compact: Bool
 
+    @ViewBuilder
     var body: some View {
-        Group {
-            if let action = attachmentAction {
-                Button {
-                    performAttachmentAction(action)
-                } label: {
-                    cardContent
-                }
-                .buttonStyle(.plain)
-                .help(action.helpText)
-            } else {
+        if let action = attachmentAction {
+            Button {
+                performAttachmentAction(action)
+            } label: {
                 cardContent
+            }
+            .buttonStyle(.plain)
+            .help(action.helpText)
+            .accessibilityLabel(attachment.filename)
+        } else {
+            cardContent
+                .help(unavailableHelpText)
+                .accessibilityLabel(attachment.filename)
+        }
+    }
+
+    @ViewBuilder
+    private var cardContent: some View {
+        if compact {
+            compactContent
+        } else {
+            regularContent
+        }
+    }
+
+    private var compactContent: some View {
+        Group {
+            if let fileURL = localAttachmentURL {
+                AttachmentThumbnailView(
+                    fileURL: fileURL,
+                    attachmentType: attachment.type,
+                    compact: true
+                )
+            } else {
+                HStack(spacing: 6) {
+                    Image(systemName: iconName)
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(.secondary)
+
+                    Text(attachment.filename)
+                        .font(.system(size: 11, weight: .medium))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+                .padding(.horizontal, 9)
+                .frame(
+                    maxWidth: AttachmentLayoutMetrics.chipMaxWidth,
+                    minHeight: AttachmentLayoutMetrics.chipHeight,
+                    alignment: .leading
+                )
+                .background(Color.white.opacity(0.18), in: Capsule(style: .continuous))
+                .overlay(
+                    Capsule(style: .continuous)
+                        .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+                )
+                .contentShape(Capsule(style: .continuous))
             }
         }
     }
 
-    private var cardContent: some View {
+    private var regularContent: some View {
         VStack(alignment: .leading, spacing: compact ? 4 : 6) {
             if let fileURL = localAttachmentURL {
                 AttachmentThumbnailView(
@@ -777,11 +907,6 @@ private struct AttachmentCardView: View {
 
             if let urlString = attachment.url, URL(string: urlString) != nil {
                 Text(urlString)
-                    .font(.system(size: compact ? 10 : 11))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            } else if let localPath = attachment.localPath {
-                Text((localPath as NSString).expandingTildeInPath)
                     .font(.system(size: compact ? 10 : 11))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -822,6 +947,15 @@ private struct AttachmentCardView: View {
         }
 
         return attachment.type.displayName
+    }
+
+    private var unavailableHelpText: String {
+        guard let localPath = attachment.localPath?.trimmed.nilIfBlank else {
+            return "Original attachment isn’t available on this Mac"
+        }
+
+        let expandedPath = (localPath as NSString).expandingTildeInPath
+        return "Original attachment isn’t available on this Mac: \(expandedPath)"
     }
 
     private func performAttachmentAction(_ action: AttachmentAction) {
@@ -869,6 +1003,12 @@ private struct AttachmentCardView: View {
     }
 }
 
+private enum AttachmentLayoutMetrics {
+    static let compactThumbnailSize = CGSize(width: 82, height: 82)
+    static let chipHeight: CGFloat = 28
+    static let chipMaxWidth: CGFloat = 168
+}
+
 private struct AttachmentThumbnailView: View {
     let fileURL: URL
     let attachmentType: AttachmentKind
@@ -877,12 +1017,16 @@ private struct AttachmentThumbnailView: View {
     @StateObject private var loader = AttachmentThumbnailLoader()
 
     private var thumbnailSize: CGSize {
-        compact ? CGSize(width: 144, height: 96) : CGSize(width: 292, height: 196)
+        compact ? AttachmentLayoutMetrics.compactThumbnailSize : CGSize(width: 292, height: 196)
+    }
+
+    private var cornerRadius: CGFloat {
+        compact ? 10 : 12
     }
 
     var body: some View {
         ZStack {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
+            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                 .fill(Color.black.opacity(0.14))
 
             if let image = loader.image {
@@ -902,16 +1046,16 @@ private struct AttachmentThumbnailView: View {
 
             if attachmentType == .video {
                 Image(systemName: "play.fill")
-                    .font(.system(size: compact ? 16 : 22, weight: .semibold))
+                    .font(.system(size: compact ? 14 : 22, weight: .semibold))
                     .foregroundStyle(.white)
-                    .padding(compact ? 8 : 11)
+                    .padding(compact ? 7 : 11)
                     .background(Color.black.opacity(0.45), in: Circle())
             }
         }
         .frame(width: thumbnailSize.width, height: thumbnailSize.height)
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
+            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                 .stroke(Color.white.opacity(0.14), lineWidth: 1)
         )
         .task(id: fileURL.path) {
