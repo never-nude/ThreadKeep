@@ -564,7 +564,7 @@ actor ArchiveStore {
     func importArchive(_ payload: ParsedArchivePayload) throws {
         var timer = ImportPerformanceTimer(label: payload.archive.title, logger: ThreadKeepLog.store)
         let archive = payload.archive
-        let payloadDeduplicatedMessages = deduplicatedImportedMessages(archive.messages, archiveID: archive.id)
+        let payloadDeduplicatedMessages = deduplicatedImportedMessages(archive.messages)
         timer.mark("dedupe key generation", items: payloadDeduplicatedMessages.count)
 
         let rawArchiveURL = importsDirectoryURL.appendingPathComponent(payload.storedFilename(for: archive.id))
@@ -820,14 +820,11 @@ actor ArchiveStore {
             .replacingOccurrences(of: "_", with: "\\_")
     }
 
-    private func deduplicatedImportedMessages(_ messages: [ImportedMessage], archiveID: String) -> [ImportedMessage] {
-        var seenKeys = Set<String>()
-        return messages.filter { message in
-            let keys = ImportedMessageDuplicateKey.keys(for: message, archiveID: archiveID)
-            guard keys.allSatisfy({ !seenKeys.contains($0) }) else { return false }
-            seenKeys.formUnion(keys)
-            return true
-        }
+    private func deduplicatedImportedMessages(_ messages: [ImportedMessage]) -> [ImportedMessage] {
+        // Same identity-only rule and lowest-source-ROWID winner as display dedup, so
+        // the copy that survives to storage is the same one the display layer would
+        // have picked, regardless of payload order.
+        deduplicatedBySourceIdentity(messages) { ($0.id, $0.metadataJSON) }
     }
 
     private func messagesSkippingExistingSourceDuplicates(
@@ -1601,13 +1598,42 @@ actor ArchiveStore {
     }
 
     private func deduplicatedMessagesForDisplay(_ messages: [MessageRecord]) -> [MessageRecord] {
-        var seenKeys = Set<String>()
-        return messages.filter { message in
-            let keys = MessageDisplayDuplicateKey.keys(for: message)
-            guard keys.allSatisfy({ !seenKeys.contains($0) }) else { return false }
-            seenKeys.formUnion(keys)
-            return true
+        deduplicatedBySourceIdentity(messages) { ($0.id, $0.metadataJSON) }
+    }
+
+    /// Collapse ONLY rows proven to be the same logical source message — an identical
+    /// Messages `guid` (globally unique and stable across a user's iCloud devices), or,
+    /// for rows imported before a guid was captured, an identical source ROWID. Rows
+    /// with no source identity fall back to their own archive-unique id, so two
+    /// genuinely distinct messages that merely share text + timestamp are never merged:
+    /// for a records archive a visible duplicate is honest and recoverable, whereas a
+    /// silently dropped message is invisible data loss. When the same message does
+    /// appear more than once, the lowest source ROWID wins (rows without a captured
+    /// ROWID sort last; the earliest row wins exact ties), so the survivor is the same
+    /// no matter what order the rows arrive in.
+    private func deduplicatedBySourceIdentity<Message>(
+        _ messages: [Message],
+        identifiedBy: (Message) -> (id: String, metadataJSON: String?)
+    ) -> [Message] {
+        var winningIndexByIdentity: [String: Int] = [:]
+
+        func sourceROWID(at index: Int) -> Int {
+            MessageDuplicateKeyHelpers.messagesRowID(from: identifiedBy(messages[index]).metadataJSON) ?? Int.max
         }
+
+        for index in messages.indices {
+            let (id, metadataJSON) = identifiedBy(messages[index])
+            let identity = MessageSourceIdentity.key(id: id, metadataJSON: metadataJSON)
+            guard let incumbent = winningIndexByIdentity[identity] else {
+                winningIndexByIdentity[identity] = index
+                continue
+            }
+            if sourceROWID(at: index) < sourceROWID(at: incumbent) {
+                winningIndexByIdentity[identity] = index
+            }
+        }
+        let winningIndices = Set(winningIndexByIdentity.values)
+        return messages.indices.compactMap { winningIndices.contains($0) ? messages[$0] : nil }
     }
 
     private func makeStatistics(messages: [MessageRecord]) -> ConversationStatistics {
@@ -1651,52 +1677,20 @@ actor ArchiveStore {
         )
     }
 
-    private enum MessageDisplayDuplicateKey {
-        static func keys(for message: MessageRecord) -> [String] {
-            var keys: [String] = []
-            keys.append(contentsOf: MessageDuplicateKeyHelpers.sourceMessageIDs(from: message.metadataJSON).map { "source:\($0)" })
-
-            let senderKey = message.isOutgoing
-                ? "outgoing:me"
-                : "incoming:\(MessageDuplicateKeyHelpers.normalizedText(message.senderDisplayName))"
-            let attachmentKey = message.attachments
-                .map { attachment in
-                    [
-                        attachment.type.rawValue,
-                        MessageDuplicateKeyHelpers.normalizedText(attachment.filename),
-                        MessageDuplicateKeyHelpers.normalizedText(attachment.localPath ?? attachment.url ?? "")
-                    ].joined(separator: ":")
-                }
-                .joined(separator: "|")
-
-            keys.append(MessageDuplicateKeyHelpers.exactMessageKey(
-                scope: nil,
-                senderKey: senderKey,
-                isOutgoing: message.isOutgoing,
-                timestamp: message.timestamp.timeIntervalSince1970,
-                bodyText: message.bodyText,
-                service: message.service.rawValue,
-                attachmentSignature: attachmentKey
-            ))
-            return keys
-        }
-    }
-
-    private enum ImportedMessageDuplicateKey {
-        static func keys(for message: ImportedMessage, archiveID: String) -> [String] {
-            var keys: [String] = []
-            keys.append(contentsOf: MessageDuplicateKeyHelpers.sourceMessageIDs(from: message.metadataJSON).map { "source:\(archiveID):\($0)" })
-
-            keys.append(MessageDuplicateKeyHelpers.exactMessageKey(
-                scope: archiveID,
-                senderKey: message.senderID,
-                isOutgoing: message.isOutgoing,
-                timestamp: message.timestamp.timeIntervalSince1970,
-                bodyText: message.bodyText,
-                service: message.service.rawValue,
-                attachmentSignature: message.attachmentIDs.joined(separator: "|")
-            ))
-            return keys
+    private enum MessageSourceIdentity {
+        /// The identity by which two rows are treated as the SAME logical message.
+        /// Priority: Messages `guid` → source ROWID → the archive-unique message id.
+        /// Text, timestamp, sender, and service are deliberately NOT part of the
+        /// identity, so distinct look-alike messages are preserved rather than
+        /// silently collapsed.
+        static func key(id: String, metadataJSON: String?) -> String {
+            if let guid = MessageDuplicateKeyHelpers.messagesGUID(from: metadataJSON) {
+                return "guid:\(guid)"
+            }
+            if let rowID = MessageDuplicateKeyHelpers.messagesRowID(from: metadataJSON) {
+                return "rowid:\(rowID)"
+            }
+            return "id:\(id)"
         }
     }
 
@@ -1806,6 +1800,46 @@ actor ArchiveStore {
             }
 
             return ids
+        }
+
+        /// The Messages `guid` for a row (top-level `messages_guid`), lowercased, or
+        /// nil when absent/blank. Deliberately parses the document instead of using
+        /// the fast key scan above: the scan can match a nested occurrence of the key
+        /// (e.g. inside an embedded context object), and a wrong value here becomes a
+        /// dedup identity that silently merges distinct messages.
+        static func messagesGUID(from metadataJSON: String?) -> String? {
+            guard let object = topLevelMetadataObject(from: metadataJSON, containingKey: "messages_guid"),
+                  let guid = (object["messages_guid"] as? String)?.trimmed.nilIfBlank
+            else {
+                return nil
+            }
+            return guid.lowercased()
+        }
+
+        /// The Messages source ROWID for a row (top-level integral `messages_rowid`),
+        /// or nil when absent. Fractional values are rejected rather than truncated —
+        /// a truncated ROWID would mint a false identity shared by distinct messages.
+        static func messagesRowID(from metadataJSON: String?) -> Int? {
+            guard let object = topLevelMetadataObject(from: metadataJSON, containingKey: "messages_rowid") else {
+                return nil
+            }
+            if let intValue = object["messages_rowid"] as? Int {
+                return intValue
+            }
+            if let string = object["messages_rowid"] as? String, let intValue = Int(string) {
+                return intValue
+            }
+            return nil
+        }
+
+        private static func topLevelMetadataObject(from metadataJSON: String?, containingKey key: String) -> [String: Any]? {
+            guard let metadataJSON, metadataJSON.contains("\"\(key)\"") else { return nil }
+            guard let data = metadataJSON.data(using: .utf8),
+                  let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+            else {
+                return nil
+            }
+            return object
         }
 
         private static func fastJSONStringValue(for key: String, in json: String) -> String? {
