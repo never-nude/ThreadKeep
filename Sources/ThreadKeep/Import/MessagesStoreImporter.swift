@@ -1,6 +1,7 @@
 @preconcurrency import Contacts
 import Foundation
 import SQLite3
+import TKArchiveDecode
 
 enum MessagesStoreImportError: LocalizedError {
     case folderNotFound
@@ -836,27 +837,27 @@ struct MessagesStoreImporter: Sendable {
     }
 
     private func legacyTypedstreamObject(from data: Data) -> Any? {
-        guard let nsUnarchiverClass = NSClassFromString("NSUnarchiver") as? NSObject.Type else {
+        // `NSUnarchiver.decodeObject` throws an Obj-C `NSException` on malformed legacy
+        // `streamtyped` archives, which Swift cannot catch — an uncaught throw aborts the
+        // whole import. Route the decode through the Obj-C shim so a bad row yields `nil`
+        // and is skipped instead of crashing.
+        guard let object = TKTryUnarchive(data) else {
+            Self.logUndecodableAttributedBodyOnce()
             return nil
         }
+        return object
+    }
 
-        let classObject = nsUnarchiverClass as AnyObject
-        let allocSelector = NSSelectorFromString("alloc")
-        let initSelector = NSSelectorFromString("initForReadingWithData:")
-        let decodeSelector = NSSelectorFromString("decodeObject")
-        let finishSelector = NSSelectorFromString("finishDecoding")
+    private static let undecodableAttributedBodyLogToken: Void = {
+        ThreadKeepLog.importer.debug(
+            "Skipped one or more messages with an undecodable legacy attributedBody archive."
+        )
+    }()
 
-        guard let allocated = classObject.perform(allocSelector)?.takeUnretainedValue() as? NSObject,
-              let unarchiver = allocated.perform(initSelector, with: data)?.takeUnretainedValue() as? NSObject
-        else {
-            return nil
-        }
-
-        let decodedObject = unarchiver.perform(decodeSelector)?.takeUnretainedValue()
-        if unarchiver.responds(to: finishSelector) {
-            _ = unarchiver.perform(finishSelector)
-        }
-        return decodedObject
+    /// Emits a single debug log line per process the first time an undecodable
+    /// `attributedBody` is encountered, to avoid flooding the log on large imports.
+    private static func logUndecodableAttributedBodyOnce() {
+        _ = undecodableAttributedBodyLogToken
     }
 
     private func orderedUniqueAttachments(from attachments: [ImportedAttachment]) -> [ImportedAttachment] {

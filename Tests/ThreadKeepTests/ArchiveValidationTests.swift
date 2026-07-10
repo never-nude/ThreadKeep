@@ -211,7 +211,641 @@ struct ArchiveValidationTests {
     }
 
     @Test
-    func threadDetailHidesExactTimestampFallbackDuplicates() async throws {
+    func mergedThreadPreservesDistinctGuidMessagesSharingTextAndTimestamp() async throws {
+        let tempFolder = FileManager.default.temporaryDirectory.appendingPathComponent("ThreadKeepMergedDistinctGuidLookalikes-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: tempFolder) }
+
+        let store = try ArchiveStore(libraryDirectoryURL: tempFolder)
+        let firstPayload = try makeMetadataDedupPayload(
+            id: "thread-lookalike-first",
+            title: "David Demarco",
+            participantName: "David Demarco",
+            messages: [
+                (
+                    id: "first-ok",
+                    body: "Ok",
+                    timestamp: "2019-06-13T20:25:27Z",
+                    isOutgoing: true,
+                    metadataJSON: "{\"import_source\":\"messages_mac_beta\",\"messages_guid\":\"GUID-OK-A\",\"messages_rowid\":600}"
+                )
+            ]
+        )
+        let secondPayload = try makeMetadataDedupPayload(
+            id: "thread-lookalike-second",
+            title: "David Demarco",
+            participantName: "David Demarco",
+            messages: [
+                (
+                    id: "second-ok",
+                    body: "Ok",
+                    timestamp: "2019-06-13T20:25:27Z",
+                    isOutgoing: true,
+                    metadataJSON: "{\"import_source\":\"messages_mac_beta\",\"messages_guid\":\"GUID-OK-B\",\"messages_rowid\":601}"
+                )
+            ]
+        )
+
+        try await store.importArchive(firstPayload)
+        try await store.importArchive(secondPayload)
+
+        let detail = try await #require(store.loadMergedThreadDetail(
+            id: "merged-lookalike",
+            title: "David Demarco",
+            threadIDs: [firstPayload.archive.id, secondPayload.archive.id]
+        ))
+
+        // Distinct guids prove these are two different source messages, so the merged
+        // view must keep both even though text, sender, and second all match.
+        #expect(detail.messages.map(\.bodyText) == ["Ok", "Ok"])
+        #expect(detail.statistics.totalMessages == 2)
+    }
+
+    @Test
+    func mergedThreadCollapsesSameGuidCopiesToLowestRowidWinner() async throws {
+        let tempFolder = FileManager.default.temporaryDirectory.appendingPathComponent("ThreadKeepMergedSameGuidWinner-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: tempFolder) }
+
+        let store = try ArchiveStore(libraryDirectoryURL: tempFolder)
+        let firstPayload = try makeMetadataDedupPayload(
+            id: "thread-sync-a",
+            title: "David Demarco",
+            participantName: "David Demarco",
+            messages: [
+                (
+                    id: "copy-a",
+                    body: "Same message synced twice",
+                    timestamp: "2019-06-13T18:18:57Z",
+                    isOutgoing: false,
+                    metadataJSON: "{\"import_source\":\"messages_mac_beta\",\"messages_guid\":\"GUID-SYNC\",\"messages_rowid\":900}"
+                )
+            ]
+        )
+        let secondPayload = try makeMetadataDedupPayload(
+            id: "thread-sync-b",
+            title: "David Demarco",
+            participantName: "David Demarco",
+            messages: [
+                (
+                    id: "anchor-b",
+                    body: "Unrelated anchor message",
+                    timestamp: "2019-06-13T19:00:00Z",
+                    isOutgoing: false,
+                    metadataJSON: "{\"import_source\":\"messages_mac_beta\",\"messages_guid\":\"GUID-ANCHOR\",\"messages_rowid\":950}"
+                )
+            ]
+        )
+
+        try await store.importArchive(firstPayload)
+        try await store.importArchive(secondPayload)
+
+        // Current imports skip already-seen source messages, but libraries created by
+        // older ThreadKeep builds can hold the same source row in more than one thread.
+        // Simulate such a legacy library by inserting two more copies directly: one
+        // with a lower ROWID and a lowercase guid (guids are case-normalized), and one
+        // that carries the guid but no ROWID at all (missing ROWIDs must lose ties).
+        let syncTimestamp = testDate("2019-06-13T18:18:57Z").timeIntervalSince1970
+        let legacyDatabase = try SQLiteDatabase(url: tempFolder.appendingPathComponent("threadkeep.sqlite"))
+        try legacyDatabase.execute(
+            """
+            INSERT INTO messages (
+                id, thread_id, sender_id, sender_display_name, is_outgoing, body_text,
+                timestamp, service, reply_to_message_id, metadata_json
+            )
+            VALUES
+            (
+                'thread-sync-b::message::copy-b',
+                'thread-sync-b',
+                'thread-sync-b::participant::other',
+                'David Demarco',
+                0,
+                'Same message synced twice',
+                \(syncTimestamp),
+                'iMessage',
+                NULL,
+                '{"import_source":"messages_mac_beta","messages_guid":"guid-sync","messages_rowid":890}'
+            ),
+            (
+                'thread-sync-b::message::copy-c',
+                'thread-sync-b',
+                'thread-sync-b::participant::other',
+                'David Demarco',
+                0,
+                'Same message synced twice',
+                \(syncTimestamp),
+                'iMessage',
+                NULL,
+                '{"import_source":"messages_mac_beta","messages_guid":"GUID-SYNC"}'
+            );
+            """
+        )
+
+        // Same guid (any case) = same logical message: exactly one copy survives, and
+        // the winner is the lowest source ROWID (900 vs 890 vs none) no matter which
+        // order the threads merge in.
+        for threadIDs in [
+            [firstPayload.archive.id, secondPayload.archive.id],
+            [secondPayload.archive.id, firstPayload.archive.id]
+        ] {
+            let detail = try await #require(store.loadMergedThreadDetail(
+                id: "merged-sync",
+                title: "David Demarco",
+                threadIDs: threadIDs
+            ))
+            let syncCopies = detail.messages.filter { $0.bodyText == "Same message synced twice" }
+            #expect(syncCopies.map(\.id) == ["thread-sync-b::message::copy-b"])
+            #expect(detail.statistics.totalMessages == 2)
+        }
+    }
+
+    @Test
+    func mergedThreadCollapsesRowidOnlyCopiesAcrossThreads() async throws {
+        let tempFolder = FileManager.default.temporaryDirectory.appendingPathComponent("ThreadKeepMergedRowidOnly-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: tempFolder) }
+
+        let store = try ArchiveStore(libraryDirectoryURL: tempFolder)
+        let firstPayload = try makeMetadataDedupPayload(
+            id: "thread-rowid-a",
+            title: "David Demarco",
+            participantName: "David Demarco",
+            messages: [
+                (
+                    id: "copy-a",
+                    body: "Legacy rowid copy",
+                    timestamp: "2019-06-13T18:18:57Z",
+                    isOutgoing: false,
+                    metadataJSON: "{\"import_source\":\"messages_mac_beta\",\"messages_rowid\":640}"
+                )
+            ]
+        )
+        let secondPayload = try makeMetadataDedupPayload(
+            id: "thread-rowid-b",
+            title: "David Demarco",
+            participantName: "David Demarco",
+            messages: [
+                (
+                    id: "anchor-b",
+                    body: "Unrelated anchor message",
+                    timestamp: "2019-06-13T19:00:00Z",
+                    isOutgoing: false,
+                    metadataJSON: "{\"import_source\":\"messages_mac_beta\",\"messages_rowid\":650}"
+                )
+            ]
+        )
+
+        try await store.importArchive(firstPayload)
+        try await store.importArchive(secondPayload)
+
+        // Legacy libraries created before guids were captured hold rowid-only metadata;
+        // the same source row can sit in two threads. Insert the second copy directly.
+        let legacyTimestamp = testDate("2019-06-13T18:18:57Z").timeIntervalSince1970
+        let legacyDatabase = try SQLiteDatabase(url: tempFolder.appendingPathComponent("threadkeep.sqlite"))
+        try legacyDatabase.execute(
+            """
+            INSERT INTO messages (
+                id, thread_id, sender_id, sender_display_name, is_outgoing, body_text,
+                timestamp, service, reply_to_message_id, metadata_json
+            )
+            VALUES (
+                'thread-rowid-b::message::copy-b',
+                'thread-rowid-b',
+                'thread-rowid-b::participant::other',
+                'David Demarco',
+                0,
+                'Legacy rowid copy',
+                \(legacyTimestamp),
+                'iMessage',
+                NULL,
+                '{"import_source":"messages_mac_beta","messages_rowid":640}'
+            );
+            """
+        )
+
+        // With no guid captured, a shared source ROWID is the identity: the copies
+        // collapse to one (equal ROWIDs tie; the earliest row in transcript order wins).
+        let detail = try await #require(store.loadMergedThreadDetail(
+            id: "merged-rowid",
+            title: "David Demarco",
+            threadIDs: [firstPayload.archive.id, secondPayload.archive.id]
+        ))
+        let rowidCopies = detail.messages.filter { $0.bodyText == "Legacy rowid copy" }
+        #expect(rowidCopies.map(\.id) == ["thread-rowid-a::message::copy-a"])
+        #expect(detail.statistics.totalMessages == 2)
+    }
+
+    @Test
+    func importCollapsesSameGuidPayloadRowsToLowestRowidWinner() async throws {
+        let tempFolder = FileManager.default.temporaryDirectory.appendingPathComponent("ThreadKeepPayloadGuidWinner-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: tempFolder) }
+
+        let store = try ArchiveStore(libraryDirectoryURL: tempFolder)
+        // The higher-ROWID copy sorts FIRST (earlier timestamp), so a first-occurrence
+        // winner would keep the wrong row; the contract requires the lowest ROWID.
+        let payload = try makeMetadataDedupPayload(
+            id: "thread-payload-winner",
+            title: "David Demarco",
+            participantName: "David Demarco",
+            messages: [
+                (
+                    id: "copy-high-rowid",
+                    body: "Synced copy (high rowid)",
+                    timestamp: "2019-06-13T18:18:57Z",
+                    isOutgoing: false,
+                    metadataJSON: "{\"import_source\":\"messages_mac_beta\",\"messages_guid\":\"GUID-PAYLOAD\",\"messages_rowid\":900}"
+                ),
+                (
+                    id: "copy-low-rowid",
+                    body: "Synced copy (low rowid)",
+                    timestamp: "2019-06-13T18:19:57Z",
+                    isOutgoing: false,
+                    metadataJSON: "{\"import_source\":\"messages_mac_beta\",\"messages_guid\":\"GUID-PAYLOAD\",\"messages_rowid\":890}"
+                )
+            ]
+        )
+
+        try await store.importArchive(payload)
+
+        // Exactly one copy reaches storage, and it is the lowest-ROWID one.
+        let summaries = try await store.loadThreadSummaries(filters: LibraryFilters())
+        #expect(summaries.map(\.messageCount) == [1])
+
+        let detail = try await #require(store.loadThreadDetail(id: payload.archive.id))
+        #expect(detail.messages.map(\.bodyText) == ["Synced copy (low rowid)"])
+        #expect(detail.statistics.totalMessages == 1)
+    }
+
+    @Test
+    func migrationRerunPreservesDistinctLookalikeMessages() async throws {
+        let tempFolder = FileManager.default.temporaryDirectory.appendingPathComponent("ThreadKeepMigrationHazard-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: tempFolder) }
+
+        let store = try ArchiveStore(libraryDirectoryURL: tempFolder)
+        // Look-alike pairs in both identity tiers: distinct guids, and no source
+        // identity at all — neither pair may ever be collapsed by a cleanup.
+        let payload = try makeMetadataDedupPayload(
+            id: "thread-lookalike-hazard",
+            title: "David Demarco",
+            participantName: "David Demarco",
+            messages: [
+                (
+                    id: "haz-a",
+                    body: "Ok",
+                    timestamp: "2021-03-04T10:15:30Z",
+                    isOutgoing: true,
+                    metadataJSON: "{\"import_source\":\"messages_mac_beta\",\"messages_guid\":\"GUID-HAZ-A\",\"messages_rowid\":600}"
+                ),
+                (
+                    id: "haz-b",
+                    body: "Ok",
+                    timestamp: "2021-03-04T10:15:30Z",
+                    isOutgoing: true,
+                    metadataJSON: "{\"import_source\":\"messages_mac_beta\",\"messages_guid\":\"GUID-HAZ-B\",\"messages_rowid\":601}"
+                ),
+                (id: "haz-c", body: "Sure", timestamp: "2021-03-04T10:15:30Z", isOutgoing: true, metadataJSON: nil),
+                (id: "haz-d", body: "Sure", timestamp: "2021-03-04T10:15:30Z", isOutgoing: true, metadataJSON: nil)
+            ]
+        )
+        try await store.importArchive(payload)
+
+        let storedBefore = try await store.loadThreadSummaries(filters: LibraryFilters())
+        #expect(storedBefore.map(\.messageCount) == [4])
+
+        // Simulate every marker-loss/re-run trigger at once: the legacy dotfile
+        // markers vanish (library copied without hidden files) AND the in-database
+        // version is forced back to zero. However the cleanup gets re-run, it must
+        // never delete a message the identity contract considers distinct.
+        for marker in ["v1", "v2", "v3"] {
+            try? FileManager.default.removeItem(
+                at: tempFolder.appendingPathComponent(".duplicate-message-cleanup-\(marker)-complete")
+            )
+        }
+        let rawDatabase = try SQLiteDatabase(url: tempFolder.appendingPathComponent("threadkeep.sqlite"))
+        try rawDatabase.execute("PRAGMA user_version = 0;")
+
+        let reopenedStore = try ArchiveStore(libraryDirectoryURL: tempFolder)
+        let detail = try await #require(reopenedStore.loadThreadDetail(id: payload.archive.id))
+        #expect(detail.messages.map(\.bodyText) == ["Ok", "Ok", "Sure", "Sure"])
+        #expect(detail.statistics.totalMessages == 4)
+
+        let storedAfter = try await reopenedStore.loadThreadSummaries(filters: LibraryFilters())
+        #expect(storedAfter.map(\.messageCount) == [4])
+
+        // The re-run must re-stamp the database version and restore the tombstone
+        // markers that keep pre-user_version builds from re-running their own pass.
+        #expect(try scalarInt("PRAGMA user_version;", at: tempFolder.appendingPathComponent("threadkeep.sqlite")) == 4)
+        for marker in ["v1", "v2", "v3"] {
+            #expect(FileManager.default.fileExists(
+                atPath: tempFolder.appendingPathComponent(".duplicate-message-cleanup-\(marker)-complete").path
+            ))
+        }
+    }
+
+    @Test
+    func migrationCleansLegacySameIdentityDuplicatesToLowestRowidWinner() async throws {
+        let tempFolder = FileManager.default.temporaryDirectory.appendingPathComponent("ThreadKeepMigrationLegacyJob-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: tempFolder) }
+
+        let store = try ArchiveStore(libraryDirectoryURL: tempFolder)
+        let payload = try makeMetadataDedupPayload(
+            id: "thread-legacy-a",
+            title: "David Demarco",
+            participantName: "David Demarco",
+            messages: [
+                (
+                    id: "copy-a",
+                    body: "Same legacy message",
+                    timestamp: "2021-03-04T10:15:30Z",
+                    isOutgoing: false,
+                    metadataJSON: "{\"import_source\":\"messages_mac_beta\",\"messages_guid\":\"GUID-LEGACY\",\"messages_rowid\":900}"
+                ),
+                (
+                    id: "anchor-a",
+                    body: "Unrelated anchor message",
+                    timestamp: "2021-03-04T11:00:00Z",
+                    isOutgoing: false,
+                    metadataJSON: "{\"import_source\":\"messages_mac_beta\",\"messages_guid\":\"GUID-LEG-ANCHOR\",\"messages_rowid\":950}"
+                )
+            ]
+        )
+        try await store.importArchive(payload)
+
+        // A legacy library can hold the same source row twice in one thread
+        // (re-import bugs in old builds). Insert the second copy directly, then
+        // force the cleanup to run again.
+        let legacyTimestamp = testDate("2021-03-04T10:15:30Z").timeIntervalSince1970
+        let rawDatabase = try SQLiteDatabase(url: tempFolder.appendingPathComponent("threadkeep.sqlite"))
+        try rawDatabase.execute(
+            """
+            INSERT INTO messages (
+                id, thread_id, sender_id, sender_display_name, is_outgoing, body_text,
+                timestamp, service, reply_to_message_id, metadata_json
+            )
+            VALUES (
+                'thread-legacy-a::message::copy-b',
+                'thread-legacy-a',
+                'thread-legacy-a::participant::other',
+                'David Demarco',
+                0,
+                'Same legacy message',
+                \(legacyTimestamp),
+                'iMessage',
+                NULL,
+                '{"import_source":"messages_mac_beta","messages_guid":"GUID-LEGACY","messages_rowid":890}'
+            );
+            PRAGMA user_version = 0;
+            """
+        )
+
+        let reopenedStore = try ArchiveStore(libraryDirectoryURL: tempFolder)
+
+        // The genuine same-guid duplicate is cleaned from storage, keyed on identity:
+        // the lowest-ROWID copy (890) wins, and stored statistics are repaired.
+        let summaries = try await reopenedStore.loadThreadSummaries(filters: LibraryFilters())
+        #expect(summaries.map(\.id) == [payload.archive.id])
+        #expect(summaries.map(\.messageCount) == [2])
+
+        let detail = try await #require(reopenedStore.loadThreadDetail(id: payload.archive.id))
+        #expect(detail.messages.map(\.bodyText) == ["Same legacy message", "Unrelated anchor message"])
+        #expect(detail.messages.first?.id == "thread-legacy-a::message::copy-b")
+
+        // The search index is rebuilt to match: no entry for the deleted copy, one
+        // for the surviving copy that was inserted behind the store's back.
+        let databaseURL = tempFolder.appendingPathComponent("threadkeep.sqlite")
+        #expect(try scalarInt("SELECT COUNT(*) FROM message_fts WHERE message_id = 'thread-legacy-a::message::copy-a';", at: databaseURL) == 0)
+        #expect(try scalarInt("SELECT COUNT(*) FROM message_fts WHERE message_id = 'thread-legacy-a::message::copy-b';", at: databaseURL) == 1)
+    }
+
+    @Test
+    func migrationLeavesCrossThreadSameIdentityCopiesToDisplayDedup() async throws {
+        let tempFolder = FileManager.default.temporaryDirectory.appendingPathComponent("ThreadKeepMigrationCrossThread-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: tempFolder) }
+
+        let store = try ArchiveStore(libraryDirectoryURL: tempFolder)
+        let firstPayload = try makeMetadataDedupPayload(
+            id: "thread-cross-a",
+            title: "David Demarco",
+            participantName: "David Demarco",
+            messages: [
+                (
+                    id: "copy-a",
+                    body: "Fanned out message",
+                    timestamp: "2021-03-04T10:15:30Z",
+                    isOutgoing: false,
+                    metadataJSON: "{\"import_source\":\"messages_mac_beta\",\"messages_guid\":\"GUID-CROSS\",\"messages_rowid\":700}"
+                )
+            ]
+        )
+        let secondPayload = try makeMetadataDedupPayload(
+            id: "thread-cross-b",
+            title: "David Demarco",
+            participantName: "David Demarco",
+            messages: [
+                (
+                    id: "anchor-b",
+                    body: "Unrelated anchor message",
+                    timestamp: "2021-03-04T11:00:00Z",
+                    isOutgoing: false,
+                    metadataJSON: "{\"import_source\":\"messages_mac_beta\",\"messages_guid\":\"GUID-CROSS-ANCHOR\",\"messages_rowid\":750}"
+                )
+            ]
+        )
+        try await store.importArchive(firstPayload)
+        try await store.importArchive(secondPayload)
+
+        let legacyTimestamp = testDate("2021-03-04T10:15:30Z").timeIntervalSince1970
+        let rawDatabase = try SQLiteDatabase(url: tempFolder.appendingPathComponent("threadkeep.sqlite"))
+        try rawDatabase.execute(
+            """
+            INSERT INTO messages (
+                id, thread_id, sender_id, sender_display_name, is_outgoing, body_text,
+                timestamp, service, reply_to_message_id, metadata_json
+            )
+            VALUES (
+                'thread-cross-b::message::copy-b',
+                'thread-cross-b',
+                'thread-cross-b::participant::other',
+                'David Demarco',
+                0,
+                'Fanned out message',
+                \(legacyTimestamp),
+                'iMessage',
+                NULL,
+                '{"import_source":"messages_mac_beta","messages_guid":"GUID-CROSS","messages_rowid":690}'
+            );
+            PRAGMA user_version = 0;
+            """
+        )
+
+        let reopenedStore = try ArchiveStore(libraryDirectoryURL: tempFolder)
+
+        // Cross-thread copies of the same source message stay in storage — each
+        // thread keeps its own complete transcript; the merged view is where the
+        // duplicate is resolved, at read time.
+        let summaries = try await reopenedStore.loadThreadSummaries(filters: LibraryFilters())
+        #expect(Set(summaries.map(\.id)) == Set([firstPayload.archive.id, secondPayload.archive.id]))
+
+        let firstDetail = try await #require(reopenedStore.loadThreadDetail(id: firstPayload.archive.id))
+        #expect(firstDetail.messages.map(\.bodyText) == ["Fanned out message"])
+
+        let secondDetail = try await #require(reopenedStore.loadThreadDetail(id: secondPayload.archive.id))
+        #expect(secondDetail.messages.map(\.bodyText) == ["Fanned out message", "Unrelated anchor message"])
+
+        let merged = try await #require(reopenedStore.loadMergedThreadDetail(
+            id: "merged-cross-thread",
+            title: "David Demarco",
+            threadIDs: [firstPayload.archive.id, secondPayload.archive.id]
+        ))
+        #expect(merged.messages.filter { $0.bodyText == "Fanned out message" }.count == 1)
+        #expect(merged.statistics.totalMessages == 2)
+    }
+
+    @Test
+    func migrationSkipsAlreadyStampedLibraries() async throws {
+        let tempFolder = FileManager.default.temporaryDirectory.appendingPathComponent("ThreadKeepMigrationSkip-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: tempFolder) }
+
+        let store = try ArchiveStore(libraryDirectoryURL: tempFolder)
+        let payload = try makeMetadataDedupPayload(
+            id: "thread-stamped",
+            title: "David Demarco",
+            participantName: "David Demarco",
+            messages: [
+                (
+                    id: "copy-a",
+                    body: "Stamped library message",
+                    timestamp: "2021-03-04T10:15:30Z",
+                    isOutgoing: false,
+                    metadataJSON: "{\"import_source\":\"messages_mac_beta\",\"messages_guid\":\"GUID-STAMPED\",\"messages_rowid\":800}"
+                )
+            ]
+        )
+        try await store.importArchive(payload)
+
+        // Plant a same-guid duplicate WITHOUT resetting the version stamp: a library
+        // already at the current cleanup generation must not be rescanned on open.
+        let legacyTimestamp = testDate("2021-03-04T10:15:30Z").timeIntervalSince1970
+        let rawDatabase = try SQLiteDatabase(url: tempFolder.appendingPathComponent("threadkeep.sqlite"))
+        try rawDatabase.execute(
+            """
+            INSERT INTO messages (
+                id, thread_id, sender_id, sender_display_name, is_outgoing, body_text,
+                timestamp, service, reply_to_message_id, metadata_json
+            )
+            VALUES (
+                'thread-stamped::message::copy-b',
+                'thread-stamped',
+                'thread-stamped::participant::other',
+                'David Demarco',
+                0,
+                'Stamped library message',
+                \(legacyTimestamp),
+                'iMessage',
+                NULL,
+                '{"import_source":"messages_mac_beta","messages_guid":"GUID-STAMPED","messages_rowid":790}'
+            );
+            """
+        )
+
+        _ = try ArchiveStore(libraryDirectoryURL: tempFolder)
+
+        // Both rows still stored: the stamped library skipped the cleanup entirely.
+        // (The display layer still hides the duplicate — that is its job, not init's.)
+        let databaseURL = tempFolder.appendingPathComponent("threadkeep.sqlite")
+        #expect(try scalarInt("SELECT COUNT(*) FROM messages WHERE thread_id = 'thread-stamped';", at: databaseURL) == 2)
+    }
+
+    @Test
+    func mergedThreadPreservesCrossServiceLookalikesWithDistinctGuids() async throws {
+        let tempFolder = FileManager.default.temporaryDirectory.appendingPathComponent("ThreadKeepMergedCrossService-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: tempFolder) }
+
+        let store = try ArchiveStore(libraryDirectoryURL: tempFolder)
+        let iMessagePayload = try makeMetadataDedupPayload(
+            id: "thread-cross-imessage",
+            title: "David Demarco",
+            participantName: "David Demarco",
+            service: .iMessage,
+            messages: [
+                (
+                    id: "im-ok",
+                    body: "Ok",
+                    timestamp: "2019-06-13T20:25:27Z",
+                    isOutgoing: true,
+                    metadataJSON: "{\"import_source\":\"messages_mac_beta\",\"messages_guid\":\"GUID-CROSS-IM\",\"messages_rowid\":700}"
+                )
+            ]
+        )
+        let smsPayload = try makeMetadataDedupPayload(
+            id: "thread-cross-sms",
+            title: "David Demarco",
+            participantName: "David Demarco",
+            service: .sms,
+            messages: [
+                (
+                    id: "sms-ok",
+                    body: "Ok",
+                    timestamp: "2019-06-13T20:25:27Z",
+                    isOutgoing: true,
+                    metadataJSON: "{\"import_source\":\"messages_mac_beta\",\"messages_guid\":\"GUID-CROSS-SMS\",\"messages_rowid\":701}"
+                )
+            ]
+        )
+
+        try await store.importArchive(iMessagePayload)
+        try await store.importArchive(smsPayload)
+
+        let detail = try await #require(store.loadMergedThreadDetail(
+            id: "merged-cross",
+            title: "David Demarco",
+            threadIDs: [iMessagePayload.archive.id, smsPayload.archive.id]
+        ))
+
+        // The same words sent over iMessage and SMS are two source messages with two
+        // guids; the merged view keeps both.
+        #expect(detail.messages.count == 2)
+        #expect(Set(detail.messages.map(\.service)) == Set([ServiceKind.iMessage, .sms]))
+        #expect(detail.statistics.totalMessages == 2)
+    }
+
+    @Test
+    func mergedThreadPreservesLookalikesWithoutSourceIdentity() async throws {
+        let tempFolder = FileManager.default.temporaryDirectory.appendingPathComponent("ThreadKeepMergedNoIdentityLookalikes-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: tempFolder) }
+
+        let store = try ArchiveStore(libraryDirectoryURL: tempFolder)
+        let firstPayload = try makeDedupPayload(
+            id: "thread-no-identity-first",
+            title: "David Demarco",
+            participantName: "David Demarco",
+            messages: [
+                (id: "first-ok", body: "Ok", timestamp: "2019-06-13T20:25:27Z", isOutgoing: true, messagesRowID: nil)
+            ]
+        )
+        let secondPayload = try makeDedupPayload(
+            id: "thread-no-identity-second",
+            title: "David Demarco",
+            participantName: "David Demarco",
+            messages: [
+                (id: "second-ok", body: "Ok", timestamp: "2019-06-13T20:25:27Z", isOutgoing: true, messagesRowID: nil)
+            ]
+        )
+
+        try await store.importArchive(firstPayload)
+        try await store.importArchive(secondPayload)
+
+        let detail = try await #require(store.loadMergedThreadDetail(
+            id: "merged-no-identity",
+            title: "David Demarco",
+            threadIDs: [firstPayload.archive.id, secondPayload.archive.id]
+        ))
+
+        // Without a source guid or ROWID there is no proof these are the same message,
+        // so the merge must keep both rather than silently drop one.
+        #expect(detail.messages.map(\.bodyText) == ["Ok", "Ok"])
+        #expect(detail.statistics.totalMessages == 2)
+    }
+
+    @Test
+    func threadDetailPreservesTimestampLookalikesWithoutSourceIdentity() async throws {
         let tempFolder = FileManager.default.temporaryDirectory.appendingPathComponent("ThreadKeepTimestampDedup-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: tempFolder) }
 
@@ -231,16 +865,18 @@ struct ArchiveValidationTests {
 
         let detail = try await #require(store.loadThreadDetail(id: payload.archive.id))
 
+        // No source identity → no proof of duplication → all three look-alikes stay.
         #expect(detail.messages.map(\.bodyText) == [
+            "Who makes a reliable suv?",
             "Who makes a reliable suv?",
             "Who makes a reliable suv?"
         ])
-        #expect(detail.messages.map(\.isOutgoing) == [true, false])
-        #expect(detail.statistics.totalMessages == 2)
+        #expect(detail.messages.map(\.isOutgoing) == [true, true, false])
+        #expect(detail.statistics.totalMessages == 3)
     }
 
     @Test
-    func threadDetailHidesMixedGuidAndRowIDSourceDuplicates() async throws {
+    func threadDetailKeepsRowidOnlyAndGuidBearingRowsDistinct() async throws {
         let tempFolder = FileManager.default.temporaryDirectory.appendingPathComponent("ThreadKeepMixedSourceDedup-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: tempFolder) }
 
@@ -250,13 +886,6 @@ struct ArchiveValidationTests {
             title: "David Demarco",
             participantName: "David Demarco",
             messages: [
-                (
-                    id: "m-rowid",
-                    body: "Lunch is at noon",
-                    timestamp: "2019-06-13T20:25:27Z",
-                    isOutgoing: false,
-                    metadataJSON: "{\"import_source\":\"messages_mac_beta\",\"messages_rowid\":777}"
-                ),
                 (
                     id: "m-guid-rowid",
                     body: "Lunch is at noon.",
@@ -276,16 +905,46 @@ struct ArchiveValidationTests {
 
         try await store.importArchive(payload)
 
+        // Older ThreadKeep builds wrote rowid-only metadata; simulate a legacy row that
+        // survived in the library alongside the freshly imported guid-bearing copy.
+        let legacyTimestamp = testDate("2019-06-13T20:25:27Z").timeIntervalSince1970
+        let legacyDatabase = try SQLiteDatabase(url: tempFolder.appendingPathComponent("threadkeep.sqlite"))
+        try legacyDatabase.execute(
+            """
+            INSERT INTO messages (
+                id, thread_id, sender_id, sender_display_name, is_outgoing, body_text,
+                timestamp, service, reply_to_message_id, metadata_json
+            )
+            VALUES (
+                'thread-mixed-source-duplicates::message::m-rowid',
+                'thread-mixed-source-duplicates',
+                'thread-mixed-source-duplicates::participant::other',
+                'David Demarco',
+                0,
+                'Lunch is at noon',
+                \(legacyTimestamp),
+                'iMessage',
+                NULL,
+                '{"import_source":"messages_mac_beta","messages_rowid":777}'
+            );
+            """
+        )
+
+        // A guid-bearing row keys on its guid alone, so the legacy rowid-only row is
+        // not assumed to be the same message: the honest, visible duplicate is
+        // preferred over risking a silent merge of two distinct messages that happened
+        // to share a ROWID across source databases.
         let detail = try await #require(store.loadThreadDetail(id: payload.archive.id))
         #expect(detail.messages.map(\.bodyText) == [
+            "Lunch is at noon.",
             "Lunch is at noon",
             "See you there"
         ])
-        #expect(detail.statistics.totalMessages == 2)
+        #expect(detail.statistics.totalMessages == 3)
     }
 
     @Test
-    func distinctSourceMessagesWithExactSameTextAndTimestampAreCollapsed() async throws {
+    func distinctSourceMessagesWithExactSameTextAndTimestampArePreserved() async throws {
         let tempFolder = FileManager.default.temporaryDirectory.appendingPathComponent("ThreadKeepExactSourceDedup-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: tempFolder) }
 
@@ -302,13 +961,14 @@ struct ArchiveValidationTests {
 
         try await store.importArchive(payload)
 
+        // Distinct source ROWIDs prove two separate sends; both stay visible.
         let detail = try await #require(store.loadThreadDetail(id: payload.archive.id))
-        #expect(detail.messages.map(\.bodyText) == ["Ok"])
-        #expect(detail.statistics.totalMessages == 1)
+        #expect(detail.messages.map(\.bodyText) == ["Ok", "Ok"])
+        #expect(detail.statistics.totalMessages == 2)
     }
 
     @Test
-    func distinctSourceMessagesWithinSameDisplayedSecondAreCollapsed() async throws {
+    func distinctSourceMessagesWithinSameDisplayedSecondArePreserved() async throws {
         let tempFolder = FileManager.default.temporaryDirectory.appendingPathComponent("ThreadKeepSecondSourceDedup-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: tempFolder) }
 
@@ -325,9 +985,10 @@ struct ArchiveValidationTests {
 
         try await store.importArchive(payload)
 
+        // Two sends inside the same displayed second are still two messages.
         let detail = try await #require(store.loadThreadDetail(id: payload.archive.id))
-        #expect(detail.messages.map(\.bodyText) == ["Ok"])
-        #expect(detail.statistics.totalMessages == 1)
+        #expect(detail.messages.map(\.bodyText) == ["Ok", "Ok"])
+        #expect(detail.statistics.totalMessages == 2)
     }
 
     @Test
@@ -1129,8 +1790,11 @@ struct ArchiveValidationTests {
         let results = try await store.searchLibrary(query: "juice box")
         #expect(results.count == 2)
 
+        // Distinct source ROWIDs (400/401) are two real messages: the transcript keeps
+        // both, while the search-result layer still folds look-alike hits above.
         let detail = try await #require(store.loadThreadDetail(id: payload.archive.id))
         #expect(detail.messages.map(\.bodyText) == [
+            "juice box on campus",
             "juice box on campus",
             "second juice box mention"
         ])
@@ -2028,6 +2692,7 @@ struct ArchiveValidationTests {
         id: String,
         title: String,
         participantName: String,
+        service: ServiceKind = .iMessage,
         messages messageSpecs: [(id: String, body: String, timestamp: String, isOutgoing: Bool, metadataJSON: String?)]
     ) throws -> ParsedArchivePayload {
         let messages = messageSpecs.map { spec in
@@ -2038,7 +2703,7 @@ struct ArchiveValidationTests {
                 isOutgoing: spec.isOutgoing,
                 bodyText: spec.body,
                 timestamp: testDate(spec.timestamp),
-                service: .iMessage,
+                service: service,
                 attachmentIDs: [],
                 replyToMessageID: nil,
                 reactions: [],
@@ -2065,6 +2730,16 @@ struct ArchiveValidationTests {
 
     private func testDate(_ value: String) -> Date {
         ISO8601DateFormatter().date(from: value)!
+    }
+
+    private func scalarInt(_ sql: String, at databaseURL: URL) throws -> Int {
+        let database = try SQLiteDatabase(url: databaseURL)
+        let statement = try database.prepare(sql)
+        defer { database.finalize(statement) }
+        guard sqlite3_step(statement) == SQLITE_ROW else {
+            return -1
+        }
+        return database.columnInt(statement, index: 0)
     }
 
     private func makeThreadSummary(id: String, title: String) -> ThreadSummary {
