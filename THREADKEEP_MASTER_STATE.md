@@ -2,7 +2,7 @@
 
 > This file is the single source of truth for ThreadKeep across all AI tools (ChatGPT, Claude Chat, Claude Coworker, Codex, and any future additions). Paste it — or link to it — at the top of every prompt. Update it whenever a decision changes. Never let any tool contradict it without first updating this file.
 
-**Last updated:** 2026-05-05
+**Last updated:** 2026-07-10
 **Owner:** Mike Kushman
 
 ---
@@ -34,6 +34,8 @@ Mac UI target: Messages.app / iMessage-style familiarity. ThreadKeep should feel
 
 Anything not on this list is out of scope until one of these ships or gets promoted/demoted here.
 
+**Done (merged to master 2026-07-10):** attributedBody import-crash fix (TKArchiveDecode shim), identity-only message dedup (guid → rowid → archive id, never content), and the versioned in-database duplicate-cleanup migration that replaces the dotfile-gated content-key cleanups. 1.0 beta 2 release prep (distribution metadata + notarized-DMG pipeline script) is also on master.
+
 ---
 
 ## 4. Constraints
@@ -53,7 +55,7 @@ Current macOS baseline:
 - Source zip: `ThreadKeep-v2-baseline-supersedes-postpolish-2026-04-25.zip`
 - DMG: `ThreadKeep-macOS-baseline-2026-04-25.dmg`
 - Status: internal baseline, not public release
-- Public release blockers: Developer ID signing, notarization, Gatekeeper-friendly distribution
+- Public release blocker (the real one, verified 2026-07-10): **Developer ID Application certificate is missing from the keychain.** The Apple Developer Program membership IS active (team `QHUS8AZVD4`, since 2026-03-23) — only the cert itself needs to be created and installed. Once it exists, the notarized-DMG pipeline (`scripts/build-notarized-dmg.sh`, on master) covers signing, notarization, and stapling.
 
 ---
 
@@ -94,6 +96,7 @@ Current macOS baseline:
 
 Record every decision that changes scope, naming, architecture, or priorities. Newest at top.
 
+- **2026-07-10** — Merged `fix/migration-content-key-hazard` to master after migration sign-off: import-crash fix for undecodable legacy `attributedBody` (TKArchiveDecode Obj-C shim), identity-only dedup contract (Messages guid → source rowid → archive-unique id; content is never an identity), and the duplicate-cleanup migration re-keyed on source identity and gated by `PRAGMA user_version` in the database itself (legacy dotfile markers are now written only as inert tombstones for downgrade safety). Read-only ship-blocker audit committed as `AUDIT.md`. Confirmed remaining public-release blocker: Developer ID Application cert missing from keychain (Developer Program active, team `QHUS8AZVD4`).
 - **2026-05-05** — `Threadkeep-thumbnails` experimental build approved as a non-baseline Mac UI prototype. Scope is limited to local attachment thumbnail rendering in the reader. No schema, archive-format, import, cloud, telemetry, account, or product-name changes.
 - **2026-05-05** — `Iapetus` experimental build approved to hide duplicate message records in loaded conversation details. Dedupe uses Messages `messages_rowid` metadata when available, with an exact timestamp/body/sender/attachment fallback for older imported records. Raw imported library data is preserved; no schema, archive-format, Messages DB mutation, cloud, telemetry, account, or product-name changes.
 - **2026-05-05** — Ganymede pre-launch polish approved. Scope: merge duplicate 1:1 contact threads by canonical Contacts identity, add global cross-conversation SQLite FTS5 search, and add Export JSON alongside Export PDF. This supersedes the prior “single visible Export PDF only” direction. Schema changes are permitted only for the scoped FTS5 search index and must include a migration path.
