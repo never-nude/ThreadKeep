@@ -143,6 +143,7 @@ final class ThreadKeepApplicationDelegate: NSObject, NSApplicationDelegate {
 struct ThreadKeepApp: App {
     @NSApplicationDelegateAdaptor(ThreadKeepApplicationDelegate.self) private var appDelegate
     @StateObject private var viewModel: AppViewModel
+    @StateObject private var updater = AppUpdater()
 
     init() {
         let viewModel = AppViewModel.live()
@@ -169,6 +170,7 @@ struct ThreadKeepApp: App {
         .defaultSize(width: 1180, height: 760)
         .windowResizability(.contentMinSize)
         .commands {
+            UpdaterCommands(updater: updater)
             ThreadKeepCommands(viewModel: viewModel)
         }
 

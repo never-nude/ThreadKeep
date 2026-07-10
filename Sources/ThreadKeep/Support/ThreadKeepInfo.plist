@@ -43,6 +43,17 @@
     <string>14.0</string>
 	<key>NSContactsUsageDescription</key>
 	<string>ThreadKeep uses your local Contacts to label imported conversations with names instead of only phone numbers or email addresses.</string>
+	<!-- Sparkle 2 updater configuration.
+	     SUEnableAutomaticChecks is deliberately ABSENT: Sparkle asks the user
+	     for consent before any scheduled checking, so the app makes zero
+	     network calls until the user explicitly opts in (or uses the
+	     "Check for Updates…" menu item). Do not add that key.
+	     SUPublicEDKey is a placeholder — the real value comes from
+	     generate_keys on the cert machine; see docs/CERT-MACHINE-SPARKLE-SETUP.md. -->
+	<key>SUFeedURL</key>
+	<string>https://threadkeep.xyz/appcast.xml</string>
+	<key>SUPublicEDKey</key>
+	<string>PLACEHOLDER-SPARKLE-EDDSA-PUBLIC-KEY</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
 	<key>NSQuitAlwaysKeepsWindows</key>

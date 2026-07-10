@@ -35,9 +35,25 @@ SIGN_IDENTITY="${SIGN_IDENTITY:-Developer ID Application}"
 NOTARY_PROFILE="${NOTARY_PROFILE:-threadkeep-notary}"
 DMG_PATH="$DIST_DIR/$PRODUCT_NAME-$VERSION_LABEL.dmg"
 
+# Sparkle compares CFBundleVersion to decide whether an update exists, so every
+# release MUST ship a strictly higher value. Bump BOTH:
+#   - CFBundleVersion in Sources/ThreadKeep/Support/ThreadKeepInfo.plist
+#   - LAST_SHIPPED_BUNDLE_VERSION below (to the value you just shipped, after release)
+LAST_SHIPPED_BUNDLE_VERSION="${LAST_SHIPPED_BUNDLE_VERSION:-2}"   # 1.0b2 shipped as CFBundleVersion 2
+BUNDLE_VERSION="$(/usr/libexec/PlistBuddy -c 'Print CFBundleVersion' "$PLIST_PATH")"
+if [[ "${1:-}" != "--dry-run" ]] && [[ "$BUNDLE_VERSION" -le "$LAST_SHIPPED_BUNDLE_VERSION" ]]; then
+    echo "CFBundleVersion is $BUNDLE_VERSION but $LAST_SHIPPED_BUNDLE_VERSION already shipped." >&2
+    echo "Sparkle will never offer this build as an update. Bump CFBundleVersion in" >&2
+    echo "Sources/ThreadKeep/Support/ThreadKeepInfo.plist before releasing." >&2
+    echo "(Override for rebuilds of the shipped version: LAST_SHIPPED_BUNDLE_VERSION=$((BUNDLE_VERSION - 1)))" >&2
+    exit 1
+fi
+
 DRY_RUN=0
 if [[ "${1:-}" == "--dry-run" ]]; then
     DRY_RUN=1
+    # Never clobber a shipped, notarized artifact with an unsigned QA build.
+    DMG_PATH="$DIST_DIR/$PRODUCT_NAME-$VERSION_LABEL-dryrun.dmg"
 fi
 
 cd "$ROOT_DIR"
@@ -72,13 +88,42 @@ fi
 if [[ -f "$ICON_PATH" ]]; then
     cp "$ICON_PATH" "$APP_BUNDLE/Contents/Resources/ThreadKeep.icns"
 fi
+
+echo "==> Embedding Sparkle.framework"
+SPARKLE_FRAMEWORK="$(find "$SCRATCH_DIR/artifacts" -type d -name "Sparkle.framework" -path "*macos*" | head -n 1)"
+if [[ -z "$SPARKLE_FRAMEWORK" || ! -d "$SPARKLE_FRAMEWORK" ]]; then
+    echo "Missing Sparkle.framework under $SCRATCH_DIR/artifacts (SwiftPM binary artifact)" >&2
+    exit 1
+fi
+mkdir -p "$APP_BUNDLE/Contents/Frameworks"
+# -R preserves the framework's internal symlink structure (Versions/B layout).
+cp -R "$SPARKLE_FRAMEWORK" "$APP_BUNDLE/Contents/Frameworks/"
+EMBEDDED_SPARKLE="$APP_BUNDLE/Contents/Frameworks/Sparkle.framework"
+
 xattr -cr "$APP_BUNDLE" 2>/dev/null || true
+
+# Sparkle ships nested executable code (XPC services, Autoupdate, Updater.app)
+# that must each be signed inside-out with the SAME identity as the app, per
+# https://sparkle-project.org/documentation/sandboxing/#code-signing — no
+# --deep, and Downloader.xpc keeps its entitlements. Notarization fails if any
+# nested item is unsigned or lacks the hardened runtime.
+sign_sparkle_nested() {
+    local -a sign_args=("$@")
+    codesign "${sign_args[@]}" "$EMBEDDED_SPARKLE/Versions/B/XPCServices/Installer.xpc"
+    codesign "${sign_args[@]}" --preserve-metadata=entitlements "$EMBEDDED_SPARKLE/Versions/B/XPCServices/Downloader.xpc"
+    codesign "${sign_args[@]}" "$EMBEDDED_SPARKLE/Versions/B/Autoupdate"
+    codesign "${sign_args[@]}" "$EMBEDDED_SPARKLE/Versions/B/Updater.app"
+    codesign "${sign_args[@]}" "$EMBEDDED_SPARKLE"
+}
 
 if [[ $DRY_RUN -eq 1 ]]; then
     echo "==> [dry run] Ad-hoc signing (no hardened runtime, no notarization)"
+    sign_sparkle_nested --force --sign -
     codesign --force --sign - "$APP_BUNDLE"
+    codesign --verify --deep --strict "$APP_BUNDLE"
 else
     echo "==> Signing with '$SIGN_IDENTITY' (hardened runtime + secure timestamp)"
+    sign_sparkle_nested --force --timestamp --options runtime --sign "$SIGN_IDENTITY"
     codesign --force --timestamp --options runtime --sign "$SIGN_IDENTITY" "$APP_BUNDLE"
     codesign --verify --deep --strict "$APP_BUNDLE"
 fi
@@ -118,3 +163,12 @@ rmdir "$VERIFY_MOUNT" 2>/dev/null || true
 echo
 echo "Notarized DMG ready:"
 ls -la "$DMG_PATH"
+
+SIGN_UPDATE="$(find "$SCRATCH_DIR/artifacts" -type f -name "sign_update" -perm +111 2>/dev/null | head -n 1)"
+echo
+echo "Sparkle release steps (this machine holds the EdDSA key — see docs/CERT-MACHINE-SPARKLE-SETUP.md):"
+echo "  1. Sign the update:  ${SIGN_UPDATE:-<scratch>/artifacts/**/bin/sign_update} '$DMG_PATH'"
+echo "  2. Copy the printed sparkle:edSignature + length into a new <item> in the"
+echo "     threadkeep-xyz repo's appcast.xml (template: docs/appcast-item-template.xml)."
+echo "  3. Commit DMG + appcast.xml together and push main to deploy."
+echo "  4. After release: bump LAST_SHIPPED_BUNDLE_VERSION in this script to $BUNDLE_VERSION."

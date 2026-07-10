@@ -9,6 +9,10 @@ let package = Package(
     products: [
         .executable(name: "ThreadKeep", targets: ["ThreadKeep"])
     ],
+    dependencies: [
+        // The app's sole third-party dependency, deliberately: in-app updates.
+        .package(url: "https://github.com/sparkle-project/Sparkle", from: "2.8.0")
+    ],
     targets: [
         // Tiny Objective-C shim so Swift can recover from NSUnarchiver's Obj-C
         // NSException on malformed legacy `attributedBody` archives (SPM has no
@@ -19,7 +23,10 @@ let package = Package(
         ),
         .executableTarget(
             name: "ThreadKeep",
-            dependencies: ["TKArchiveDecode"],
+            dependencies: [
+                "TKArchiveDecode",
+                .product(name: "Sparkle", package: "Sparkle")
+            ],
             path: "Sources/ThreadKeep",
             exclude: [
                 "Support",
@@ -34,7 +41,11 @@ let package = Package(
                     "-Xlinker", "-sectcreate",
                     "-Xlinker", "__TEXT",
                     "-Xlinker", "__info_plist",
-                    "-Xlinker", "Sources/ThreadKeep/Support/ThreadKeepInfo.plist"
+                    "-Xlinker", "Sources/ThreadKeep/Support/ThreadKeepInfo.plist",
+                    // Sparkle.framework is embedded at Contents/Frameworks by
+                    // scripts/build-notarized-dmg.sh; the loader needs this rpath.
+                    "-Xlinker", "-rpath",
+                    "-Xlinker", "@executable_path/../Frameworks"
                 ], .when(platforms: [.macOS]))
             ]
         ),

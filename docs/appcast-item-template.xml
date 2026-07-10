@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Sparkle appcast for ThreadKeep — LIVES IN THE SITE REPO (threadkeep-xyz) at
+  the repo root, served as https://threadkeep.xyz/appcast.xml (must match
+  SUFeedURL in ThreadKeepInfo.plist).
+
+  Per release, prepend one <item>:
+    sparkle:version              = CFBundleVersion of the new build (strictly increasing)
+    sparkle:shortVersionString   = marketing version shown to users
+    enclosure url                = the DMG under /downloads/ (keep old DMGs in place)
+    enclosure length             = exact byte size of the DMG (ls -l)
+    sparkle:edSignature          = output of sign_update on the CERT MACHINE
+                                   (docs/CERT-MACHINE-SPARKLE-SETUP.md)
+
+  Keep prior <item>s — Sparkle picks the highest version; history is harmless
+  and lets old builds skip intermediate versions.
+-->
+<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
+  <channel>
+    <title>ThreadKeep updates</title>
+    <link>https://threadkeep.xyz/appcast.xml</link>
+    <description>ThreadKeep release feed</description>
+    <language>en</language>
+
+    <!-- TEMPLATE ITEM — copy, fill every {{…}}, and remove this comment -->
+    <item>
+      <title>ThreadKeep {{SHORT_VERSION}}</title>
+      <pubDate>{{RFC822_DATE}}</pubDate>
+      <sparkle:version>{{BUNDLE_VERSION}}</sparkle:version>
+      <sparkle:shortVersionString>{{SHORT_VERSION}}</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <description><![CDATA[
+        <h2>What's new in {{SHORT_VERSION}}</h2>
+        <ul>
+          <li>{{RELEASE_NOTE}}</li>
+        </ul>
+      ]]></description>
+      <enclosure
+        url="https://threadkeep.xyz/downloads/ThreadKeep-{{VERSION_LABEL}}.dmg"
+        length="{{DMG_BYTES}}"
+        type="application/octet-stream"
+        sparkle:edSignature="{{ED_SIGNATURE_FROM_SIGN_UPDATE}}" />
+    </item>
+  </channel>
+</rss>
