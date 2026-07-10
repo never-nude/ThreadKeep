@@ -40,18 +40,22 @@ actor ArchiveStore {
 
         database = try SQLiteDatabase(url: databaseURL)
         try Self.initializeSchema(on: database)
-        try Self.runDuplicateMessageCleanupMigrationIfNeeded(
-            on: database,
-            markerURL: self.libraryDirectoryURL.appendingPathComponent(".duplicate-message-cleanup-v1-complete")
-        )
-        try Self.runDuplicateMessageCleanupMigrationIfNeeded(
-            on: database,
-            markerURL: self.libraryDirectoryURL.appendingPathComponent(".duplicate-message-cleanup-v2-complete")
-        )
-        try Self.runDuplicateMessageCleanupMigrationIfNeeded(
-            on: database,
-            markerURL: self.libraryDirectoryURL.appendingPathComponent(".duplicate-message-cleanup-v3-complete")
-        )
+        try Self.runDuplicateMessageCleanupMigrationIfNeeded(on: database)
+        Self.writeLegacyCleanupTombstonesIfMissing(in: self.libraryDirectoryURL)
+    }
+
+    /// Builds that predate `PRAGMA user_version` gate their content-keyed cleanup
+    /// solely on these dotfiles and re-run it whenever they are missing — destroying
+    /// look-alike messages this build preserves. Writing the markers as inert
+    /// tombstones (this build never consults them) immunizes the library against
+    /// being opened by an older binary. Best-effort: a failed marker write must not
+    /// fail library startup.
+    private static func writeLegacyCleanupTombstonesIfMissing(in libraryDirectoryURL: URL) {
+        for version in ["v1", "v2", "v3"] {
+            let markerURL = libraryDirectoryURL.appendingPathComponent(".duplicate-message-cleanup-\(version)-complete")
+            guard !FileManager.default.fileExists(atPath: markerURL.path) else { continue }
+            try? "superseded_by=pragma_user_version\n".write(to: markerURL, atomically: true, encoding: .utf8)
+        }
     }
 
     func ensureSeedArchiveImportedIfNeeded() throws -> Bool {
@@ -824,7 +828,7 @@ actor ArchiveStore {
         // Same identity-only rule and lowest-source-ROWID winner as display dedup, so
         // the copy that survives to storage is the same one the display layer would
         // have picked, regardless of payload order.
-        deduplicatedBySourceIdentity(messages) { ($0.id, $0.metadataJSON) }
+        Self.deduplicatedBySourceIdentity(messages) { ($0.id, $0.metadataJSON) }
     }
 
     private func messagesSkippingExistingSourceDuplicates(
@@ -1393,17 +1397,36 @@ actor ArchiveStore {
         }
     }
 
-    private static func runDuplicateMessageCleanupMigrationIfNeeded(on database: SQLiteDatabase, markerURL: URL) throws {
-        guard !FileManager.default.fileExists(atPath: markerURL.path) else {
+    /// Library cleanup generation, stamped into the database itself via
+    /// `PRAGMA user_version` so it travels with the data. Generations 1–3 were
+    /// content-key cleanups gated by dotfile markers in the library folder; those
+    /// markers could be lost by copies or backups that skip hidden files, silently
+    /// re-running a deletion pass keyed on content — which destroys look-alike
+    /// messages the identity contract preserves. The dotfiles are no longer written
+    /// or consulted. Generation 4 rekeys the cleanup on `MessageSourceIdentity`,
+    /// which also makes any re-run harmless: it can only ever remove extra copies
+    /// of the same proven source message.
+    private static let identityCleanupUserVersion = 4
+
+    private static func runDuplicateMessageCleanupMigrationIfNeeded(on database: SQLiteDatabase) throws {
+        guard try libraryUserVersion(on: database) < identityCleanupUserVersion else {
             return
         }
 
         var timer = ImportPerformanceTimer(label: "duplicate cleanup migration", logger: ThreadKeepLog.store)
         let cleanedCount = try cleanupDuplicateStoredMessages(on: database)
-        timer.mark("one-time stored duplicate cleanup", items: cleanedCount)
+        timer.mark("stored duplicate cleanup", items: cleanedCount)
 
-        let marker = "completed_at=\(ISO8601DateFormatter().string(from: Date()))\n"
-        try marker.write(to: markerURL, atomically: true, encoding: .utf8)
+        try database.execute("PRAGMA user_version = \(identityCleanupUserVersion);")
+    }
+
+    private static func libraryUserVersion(on database: SQLiteDatabase) throws -> Int {
+        let statement = try database.prepare("PRAGMA user_version;")
+        defer { database.finalize(statement) }
+        guard sqlite3_step(statement) == SQLITE_ROW else {
+            return 0
+        }
+        return database.columnInt(statement, index: 0)
     }
 
     private static func loadSourceMessageIDs(on database: SQLiteDatabase, threadID: String? = nil) throws -> Set<String> {
@@ -1441,18 +1464,24 @@ actor ArchiveStore {
 
     @discardableResult
     private static func cleanupDuplicateStoredMessages(on database: SQLiteDatabase) throws -> Int {
-        let candidates = try loadStoredMessageDuplicateCandidates(on: database)
-        var seenKeys = Set<String>()
-        var duplicateIDs: [String] = []
-
-        for candidate in candidates {
-            let keys = StoredMessageDuplicateKey.keys(for: candidate)
-            guard keys.allSatisfy({ !seenKeys.contains($0) }) else {
-                duplicateIDs.append(candidate.id)
-                continue
-            }
-            seenKeys.formUnion(keys)
+        // Deletion is keyed on the same source-identity rule — and the same
+        // lowest-ROWID winner — as display and import dedup: deduplicatedBySourceIdentity
+        // is the single definition of "same message" in the codebase, so this cleanup
+        // can never delete a message the contract considers distinct, no matter how
+        // many times it runs.
+        //
+        // Scope is per thread. A same-identity copy in ANOTHER thread is the
+        // merged-view case, which display dedup already resolves at read time;
+        // deleting it from storage would leave that thread's own transcript
+        // permanently incomplete for no functional gain.
+        let candidates = try loadStoredMessageIdentityCandidates(on: database)
+        var winnerIDs = Set<String>()
+        for threadCandidates in Dictionary(grouping: candidates, by: \.threadID).values {
+            winnerIDs.formUnion(
+                deduplicatedBySourceIdentity(threadCandidates) { ($0.id, $0.metadataJSON) }.map(\.id)
+            )
         }
+        let duplicateIDs = candidates.map(\.id).filter { !winnerIDs.contains($0) }
 
         guard !duplicateIDs.isEmpty else {
             try database.transaction {
@@ -1538,9 +1567,17 @@ actor ArchiveStore {
         try cleanupOrphanedParticipants(on: database)
     }
 
-    private static func loadStoredMessageDuplicateCandidates(on database: SQLiteDatabase) throws -> [StoredMessageDuplicateCandidate] {
+    private struct StoredMessageIdentityCandidate {
+        let id: String
+        let threadID: String
+        let metadataJSON: String?
+    }
+
+    private static func loadStoredMessageIdentityCandidates(on database: SQLiteDatabase) throws -> [StoredMessageIdentityCandidate] {
+        // Ordered exactly like the display path sorts messages, so an exact tie
+        // (same identity, same ROWID) keeps the same row the transcript would show.
         let sql = """
-        SELECT id, thread_id, sender_id, sender_display_name, is_outgoing, body_text, timestamp, service, metadata_json
+        SELECT id, thread_id, metadata_json
         FROM messages
         ORDER BY timestamp ASC, id ASC;
         """
@@ -1548,57 +1585,21 @@ actor ArchiveStore {
         let statement = try database.prepare(sql)
         defer { database.finalize(statement) }
 
-        let attachmentSignatures = try loadAttachmentSignaturesByMessage(on: database)
-        var candidates: [StoredMessageDuplicateCandidate] = []
+        var candidates: [StoredMessageIdentityCandidate] = []
         while sqlite3_step(statement) == SQLITE_ROW {
-            let messageID = database.columnText(statement, index: 0) ?? ""
             candidates.append(
-                StoredMessageDuplicateCandidate(
-                    id: messageID,
+                StoredMessageIdentityCandidate(
+                    id: database.columnText(statement, index: 0) ?? "",
                     threadID: database.columnText(statement, index: 1) ?? "",
-                    senderID: database.columnText(statement, index: 2) ?? "",
-                    senderDisplayName: database.columnText(statement, index: 3) ?? "",
-                    isOutgoing: database.columnInt(statement, index: 4) == 1,
-                    bodyText: database.columnText(statement, index: 5) ?? "",
-                    timestamp: database.columnDouble(statement, index: 6) ?? 0,
-                    service: database.columnText(statement, index: 7) ?? "",
-                    metadataJSON: database.columnText(statement, index: 8),
-                    attachmentSignature: attachmentSignatures[messageID] ?? ""
+                    metadataJSON: database.columnText(statement, index: 2)
                 )
             )
         }
         return candidates
     }
 
-    private static func loadAttachmentSignaturesByMessage(on database: SQLiteDatabase) throws -> [String: String] {
-        let sql = """
-        SELECT ma.message_id, a.type, a.filename, COALESCE(a.local_path, a.url, '')
-        FROM message_attachments ma
-        JOIN attachments a ON a.id = ma.attachment_id
-        ORDER BY ma.message_id ASC, ma.position ASC, a.id ASC;
-        """
-
-        let statement = try database.prepare(sql)
-        defer { database.finalize(statement) }
-
-        var partsByMessage: [String: [String]] = [:]
-        while sqlite3_step(statement) == SQLITE_ROW {
-            let messageID = database.columnText(statement, index: 0) ?? ""
-            let attachmentPart = [
-                database.columnText(statement, index: 1) ?? "",
-                database.columnText(statement, index: 2) ?? "",
-                database.columnText(statement, index: 3) ?? ""
-            ]
-                .map(MessageDuplicateKeyHelpers.normalizedText)
-                .joined(separator: ":")
-            partsByMessage[messageID, default: []].append(attachmentPart)
-        }
-
-        return partsByMessage.mapValues { $0.joined(separator: "|") }
-    }
-
     private func deduplicatedMessagesForDisplay(_ messages: [MessageRecord]) -> [MessageRecord] {
-        deduplicatedBySourceIdentity(messages) { ($0.id, $0.metadataJSON) }
+        Self.deduplicatedBySourceIdentity(messages) { ($0.id, $0.metadataJSON) }
     }
 
     /// Collapse ONLY rows proven to be the same logical source message — an identical
@@ -1611,7 +1612,7 @@ actor ArchiveStore {
     /// appear more than once, the lowest source ROWID wins (rows without a captured
     /// ROWID sort last; the earliest row wins exact ties), so the survivor is the same
     /// no matter what order the rows arrive in.
-    private func deduplicatedBySourceIdentity<Message>(
+    private static func deduplicatedBySourceIdentity<Message>(
         _ messages: [Message],
         identifiedBy: (Message) -> (id: String, metadataJSON: String?)
     ) -> [Message] {
@@ -1691,37 +1692,6 @@ actor ArchiveStore {
                 return "rowid:\(rowID)"
             }
             return "id:\(id)"
-        }
-    }
-
-    private struct StoredMessageDuplicateCandidate {
-        let id: String
-        let threadID: String
-        let senderID: String
-        let senderDisplayName: String
-        let isOutgoing: Bool
-        let bodyText: String
-        let timestamp: Double
-        let service: String
-        let metadataJSON: String?
-        let attachmentSignature: String
-    }
-
-    private enum StoredMessageDuplicateKey {
-        static func keys(for candidate: StoredMessageDuplicateCandidate) -> [String] {
-            var keys: [String] = []
-            keys.append(contentsOf: MessageDuplicateKeyHelpers.sourceMessageIDs(from: candidate.metadataJSON).map { "source:\($0)" })
-
-            keys.append(MessageDuplicateKeyHelpers.exactMessageKey(
-                scope: candidate.threadID,
-                senderKey: candidate.senderID,
-                isOutgoing: candidate.isOutgoing,
-                timestamp: candidate.timestamp,
-                bodyText: candidate.bodyText,
-                service: candidate.service,
-                attachmentSignature: candidate.attachmentSignature
-            ))
-            return keys
         }
     }
 
