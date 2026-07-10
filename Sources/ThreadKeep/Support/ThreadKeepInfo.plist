@@ -2,81 +2,74 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <key>CFBundleDevelopmentRegion</key>
-    <string>en</string>
-    <key>LSApplicationCategoryType</key>
-    <string>public.app-category.utilities</string>
-    <key>NSHumanReadableCopyright</key>
-    <string>© 2026 Michael Kushman. All rights reserved.</string>
-    <key>CFBundleDocumentTypes</key>
-    <array>
-        <dict>
-            <key>CFBundleTypeName</key>
-            <string>ThreadKeep Library Bundle</string>
-            <key>CFBundleTypeRole</key>
-            <string>Viewer</string>
-            <key>LSHandlerRank</key>
-            <string>Owner</string>
-            <key>LSItemContentTypes</key>
-            <array>
-                <string>com.threadkeep.library</string>
-            </array>
-        </dict>
-    </array>
-    <key>CFBundleDisplayName</key>
-    <string>ThreadKeep</string>
-    <key>CFBundleExecutable</key>
-    <string>ThreadKeep</string>
-    <key>CFBundleIconFile</key>
-    <string>ThreadKeep</string>
-    <key>CFBundleIdentifier</key>
-    <string>com.threadkeep.app</string>
-    <key>CFBundleName</key>
-    <string>ThreadKeep</string>
-    <key>CFBundlePackageType</key>
-    <string>APPL</string>
-    <key>CFBundleShortVersionString</key>
-    <string>1.0</string>
-    <key>CFBundleVersion</key>
-    <string>2</string>
-    <key>LSMinimumSystemVersion</key>
-    <string>14.0</string>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>en</string>
+	<key>CFBundleDisplayName</key>
+	<string>ThreadKeep</string>
+	<key>CFBundleDocumentTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>ThreadKeep Library Bundle</string>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+			<key>LSHandlerRank</key>
+			<string>Owner</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>com.threadkeep.library</string>
+			</array>
+		</dict>
+	</array>
+	<key>CFBundleExecutable</key>
+	<string>ThreadKeep</string>
+	<key>CFBundleIconFile</key>
+	<string>ThreadKeep</string>
+	<key>CFBundleIdentifier</key>
+	<string>com.threadkeep.app</string>
+	<key>CFBundleName</key>
+	<string>ThreadKeep</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>1.0</string>
+	<key>CFBundleVersion</key>
+	<string>3</string>
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.utilities</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>14.0</string>
 	<key>NSContactsUsageDescription</key>
 	<string>ThreadKeep uses your local Contacts to label imported conversations with names instead of only phone numbers or email addresses.</string>
-	<!-- Sparkle 2 updater configuration.
-	     SUEnableAutomaticChecks is deliberately ABSENT: Sparkle asks the user
-	     for consent before any scheduled checking, so the app makes zero
-	     network calls until the user explicitly opts in (or uses the
-	     "Check for Updates…" menu item). Do not add that key.
-	     SUPublicEDKey is a placeholder — the real value comes from
-	     generate_keys on the cert machine; see docs/CERT-MACHINE-SPARKLE-SETUP.md. -->
-	<key>SUFeedURL</key>
-	<string>https://threadkeep.xyz/appcast.xml</string>
-	<key>SUPublicEDKey</key>
-	<string>PLACEHOLDER-SPARKLE-EDDSA-PUBLIC-KEY</string>
+	<key>NSHumanReadableCopyright</key>
+	<string>© 2026 Michael Kushman. All rights reserved.</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
 	<key>NSQuitAlwaysKeepsWindows</key>
 	<false/>
-    <key>UTExportedTypeDeclarations</key>
-    <array>
-        <dict>
-            <key>UTTypeConformsTo</key>
-            <array>
-                <string>com.apple.package</string>
-            </array>
-            <key>UTTypeDescription</key>
-            <string>ThreadKeep Library Bundle</string>
-            <key>UTTypeIdentifier</key>
-            <string>com.threadkeep.library</string>
-            <key>UTTypeTagSpecification</key>
-            <dict>
-                <key>public.filename-extension</key>
-                <array>
-                    <string>threadkeeplibrary</string>
-                </array>
-            </dict>
-        </dict>
-    </array>
+	<key>SUFeedURL</key>
+	<string>https://threadkeep.xyz/appcast.xml</string>
+	<key>SUPublicEDKey</key>
+	<string>DTEV9bRc3jTMQfe4CfqJLJI/DJaPA4V8FkxiMLoq0uQ=</string>
+	<key>UTExportedTypeDeclarations</key>
+	<array>
+		<dict>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>com.apple.package</string>
+			</array>
+			<key>UTTypeDescription</key>
+			<string>ThreadKeep Library Bundle</string>
+			<key>UTTypeIdentifier</key>
+			<string>com.threadkeep.library</string>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>threadkeeplibrary</string>
+				</array>
+			</dict>
+		</dict>
+	</array>
 </dict>
 </plist>
