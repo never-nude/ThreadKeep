@@ -4,6 +4,10 @@
 <dict>
     <key>CFBundleDevelopmentRegion</key>
     <string>en</string>
+    <key>LSApplicationCategoryType</key>
+    <string>public.app-category.utilities</string>
+    <key>NSHumanReadableCopyright</key>
+    <string>© 2026 Michael Kushman. All rights reserved.</string>
     <key>CFBundleDocumentTypes</key>
     <array>
         <dict>
@@ -34,7 +38,7 @@
     <key>CFBundleShortVersionString</key>
     <string>1.0</string>
     <key>CFBundleVersion</key>
-    <string>1</string>
+    <string>2</string>
     <key>LSMinimumSystemVersion</key>
     <string>14.0</string>
 	<key>NSContactsUsageDescription</key>
