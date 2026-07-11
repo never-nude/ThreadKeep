@@ -104,6 +104,7 @@ struct Suffix10RemovalTests {
         #expect(s1.handlesAudited == 2)
         #expect(s1.suffixDependentHandles == 1)
         #expect(s1.suffixDependentThreads == 1)
+        #expect(s1.affectedThreadIndexes == [0])
 
         // Benign US notation variants resolve identically under both schemes.
         let benign = Suffix10Audit.run(

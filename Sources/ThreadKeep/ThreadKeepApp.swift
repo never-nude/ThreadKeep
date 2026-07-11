@@ -146,13 +146,14 @@ struct ThreadKeepApp: App {
     @StateObject private var updater = AppUpdater()
 
     init() {
-        if CommandLine.arguments.contains("--audit-suffix10") {
+        if CommandLine.arguments.contains("--audit-suffix10") || CommandLine.arguments.contains("--audit-suffix10-reveal") {
+            let reveal = CommandLine.arguments.contains("--audit-suffix10-reveal")
             // Block launch until the read-only audit finishes, then exit
             // without ever building UI. The audit runs off the main actor,
             // so waiting here cannot deadlock it.
             let auditDone = DispatchSemaphore(value: 0)
             Task.detached {
-                await Suffix10Audit.runOnLibraryAndPrint()
+                await Suffix10Audit.runOnLibraryAndPrint(reveal: reveal)
                 auditDone.signal()
             }
             auditDone.wait()

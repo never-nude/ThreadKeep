@@ -22,6 +22,9 @@ enum Suffix10Audit {
         var suffixDependentHandles = 0
         var threadsAudited = 0
         var suffixDependentThreads = 0
+        /// Positions (in the input order) of the affected threads, so the
+        /// reveal mode can name them locally.
+        var affectedThreadIndexes: [Int] = []
     }
 
     /// The REMOVED legacy key scheme, kept verbatim and quarantined here so the
@@ -81,7 +84,7 @@ enum Suffix10Audit {
         }
 
         var result = Result()
-        for handles in threads {
+        for (index, handles) in threads.enumerated() {
             result.threadsAudited += 1
             var threadIsSuffixDependent = false
             for handle in handles {
@@ -93,6 +96,7 @@ enum Suffix10Audit {
             }
             if threadIsSuffixDependent {
                 result.suffixDependentThreads += 1
+                result.affectedThreadIndexes.append(index)
             }
         }
         return result
@@ -101,20 +105,33 @@ enum Suffix10Audit {
     /// App-side glue: audits the real library against the real Contacts
     /// database. Read-only on both. Prints counts only — no names, numbers,
     /// or titles ever reach stdout.
-    static func runOnLibraryAndPrint() async {
+    /// `reveal` additionally prints the affected threads' titles. That output
+    /// identifies people, so it exists for the library owner's own terminal —
+    /// run it interactively, never piped into logs or reports.
+    static func runOnLibraryAndPrint(reveal: Bool = false) async {
         guard await MessagesStoreImporter.requestContactAccessIfNeeded() == .authorized else {
-            print("suffix10-audit: Contacts access not authorized — nothing to audit (legacy and strict both resolve no contacts without access).")
+            let raw = CNContactStore.authorizationStatus(for: .contacts).rawValue
+            print("suffix10-audit: Contacts access not authorized (CNAuthorizationStatus raw=\(raw)) — nothing to audit (legacy and strict both resolve no contacts without access).")
             return
         }
 
         let contacts = loadContactPhoneFixtures()
         let threads = await loadStoredPhoneHandlesPerThread()
-        let result = run(threads: threads, contacts: contacts)
+        let result = run(threads: threads.map(\.handles), contacts: contacts)
 
         print("suffix10-audit: threads audited: \(result.threadsAudited)")
         print("suffix10-audit: phone handles audited: \(result.handlesAudited)")
         print("suffix10-audit: handles whose resolution depended on the removed suffix-10 fallback: \(result.suffixDependentHandles)")
         print("suffix10-audit: threads affected: \(result.suffixDependentThreads)")
+
+        if reveal {
+            for index in result.affectedThreadIndexes {
+                print("suffix10-audit: affected thread: \(threads[index].title)")
+            }
+            if result.affectedThreadIndexes.isEmpty {
+                print("suffix10-audit: no affected threads to reveal.")
+            }
+        }
     }
 
     private static func loadContactPhoneFixtures() -> [ContactFixture] {
@@ -133,7 +150,7 @@ enum Suffix10Audit {
         return fixtures
     }
 
-    private static func loadStoredPhoneHandlesPerThread() async -> [[String]] {
+    private static func loadStoredPhoneHandlesPerThread() async -> [(title: String, handles: [String])] {
         guard let store = try? ArchiveStore(),
               let summaries = try? await store.loadThreadSummaries(filters: LibraryFilters())
         else {
@@ -141,9 +158,10 @@ enum Suffix10Audit {
         }
 
         return summaries.map { summary in
-            summary.participantNames
+            let handles = summary.participantNames
                 .map { ContactDisplayResolver.storedHandle(fromParticipantLabel: $0) }
                 .filter { !$0.isEmpty && !$0.contains("@") && $0.lowercased() != "you" }
+            return (title: summary.title, handles: handles)
         }
     }
 }
