@@ -546,6 +546,14 @@ private struct MessageBubbleView: View {
     let sourceHandle: String?
     @ObservedObject var resolver: ContactDisplayResolver
 
+    /// Brief arrival glow when this bubble becomes the active search result.
+    /// Plays once and settles into the steady active style; rapid navigation
+    /// supersedes it because the outgoing bubble's isFocused flips false and
+    /// resets the state immediately. With Reduce Motion, the steady style
+    /// appears with no pulse at all.
+    @State private var isArrivalPulsing = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     private var bubbleBackground: Color {
         message.isOutgoing
             ? Color(nsColor: .systemBlue)
@@ -589,9 +597,22 @@ private struct MessageBubbleView: View {
                         }
                     }
                     .shadow(
-                        color: isFocused ? SearchHighlightStyle.activeGlow.opacity(0.35) : .clear,
-                        radius: isFocused ? 5 : 0
+                        color: isFocused ? SearchHighlightStyle.activeGlow.opacity(isArrivalPulsing ? 0.6 : 0.35) : .clear,
+                        radius: isFocused ? (isArrivalPulsing ? 10 : 5) : 0
                     )
+                    .onChange(of: isFocused) { _, focused in
+                        guard focused, !reduceMotion else {
+                            isArrivalPulsing = false
+                            return
+                        }
+                        isArrivalPulsing = true
+                        Task { @MainActor in
+                            try? await Task.sleep(nanoseconds: 80_000_000)
+                            withAnimation(.easeOut(duration: 0.5)) {
+                                isArrivalPulsing = false
+                            }
+                        }
+                    }
 
                 Text(AppFormatters.preciseMessageTime.string(from: message.timestamp))
                     .font(.system(size: 10, weight: .regular).monospacedDigit())
