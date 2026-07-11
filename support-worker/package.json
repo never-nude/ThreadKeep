@@ -1,0 +1,8 @@
+{
+  "name": "threadkeep-support",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "mimetext": "^3.0.27"
+  }
+}

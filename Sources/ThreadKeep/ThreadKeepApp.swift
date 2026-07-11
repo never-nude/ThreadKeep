@@ -186,12 +186,27 @@ struct ThreadKeepApp: App {
         .commands {
             UpdaterCommands(updater: updater)
             ThreadKeepCommands(viewModel: viewModel)
+            ContactSupportCommands()
         }
 
         Settings {
             SettingsView()
                 .environmentObject(viewModel)
                 .frame(width: 560, height: 420)
+        }
+    }
+}
+
+/// Help → Contact Support… — the primary entry point to the contact form.
+/// Posts a notification that RootView turns into a sheet, mirroring how the
+/// import flow is triggered (.threadKeepRequestImport). This keeps a single
+/// always-present host and avoids singleton-window reopen fragility.
+struct ContactSupportCommands: Commands {
+    var body: some Commands {
+        CommandGroup(after: .help) {
+            Button("Contact Support…") {
+                NotificationCenter.default.post(name: .threadKeepRequestContactSupport, object: nil)
+            }
         }
     }
 }
@@ -267,4 +282,7 @@ extension Notification.Name {
 
     /// Posted after Contacts permission changes so visible resolvers can re-read names and photos.
     static let threadKeepContactsAccessDidChange = Notification.Name("com.threadkeep.app.contactsAccessDidChange")
+
+    /// Posted when the user picks Help → Contact Support… (or the Settings link).
+    static let threadKeepRequestContactSupport = Notification.Name("com.threadkeep.app.requestContactSupport")
 }

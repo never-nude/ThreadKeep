@@ -17,6 +17,7 @@ struct RootView: View {
     @State private var hasAppliedInitialAppFlow = false
     @State private var isSessionUnlocked = false
     @State private var isAuthenticatingLibraryAccess = false
+    @State private var isShowingContactSupport = false
 
     var body: some View {
         Group {
@@ -77,6 +78,12 @@ struct RootView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .threadKeepRequestImport)) { _ in
             beginAuthenticatedImport()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .threadKeepRequestContactSupport)) { _ in
+            isShowingContactSupport = true
+        }
+        .sheet(isPresented: $isShowingContactSupport) {
+            ContactSupportView()
         }
         .task {
             resetPrivacyLaunchStateForLaunch()

@@ -14,6 +14,10 @@ struct SettingsView: View {
                     Text("ThreadKeep turns the Messages already on your Mac into a simple library you can browse, search, and revisit.")
                         .font(.system(size: 12))
                         .foregroundStyle(.secondary)
+                    Button("Contact Support…") {
+                        NotificationCenter.default.post(name: .threadKeepRequestContactSupport, object: nil)
+                    }
+                    .font(.system(size: 12))
                 }
 
                 Divider()

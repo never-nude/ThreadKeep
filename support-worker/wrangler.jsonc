@@ -1,0 +1,13 @@
+// ThreadKeep support endpoint — receives in-app contact-form submissions and
+// relays them to the private support inbox. The inbox address lives ONLY in
+// the SUPPORT_INBOX worker secret (never in this repo, never in the app).
+{
+  "name": "threadkeep-support",
+  "main": "src/index.js",
+  "compatibility_date": "2026-07-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": false,
+  "routes": [{ "pattern": "support.treefort.lol", "custom_domain": true }],
+  "send_email": [{ "name": "EMAIL" }],
+  "kv_namespaces": [{ "binding": "RATE", "id": "fd308744a8e6424399275b9b8bea2b7d" }]
+}

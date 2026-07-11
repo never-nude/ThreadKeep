@@ -51,6 +51,8 @@
 	<string>https://threadkeep.xyz/appcast.xml</string>
 	<key>SUPublicEDKey</key>
 	<string>DTEV9bRc3jTMQfe4CfqJLJI/DJaPA4V8FkxiMLoq0uQ=</string>
+	<key>TKSupportEndpoint</key>
+	<string>https://support.treefort.lol/submit</string>
 	<key>UTExportedTypeDeclarations</key>
 	<array>
 		<dict>
