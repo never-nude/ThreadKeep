@@ -154,6 +154,17 @@ struct ThreadKeepApp: App {
             let raw = CNContactStore.authorizationStatus(for: .contacts).rawValue
             print("contacts-status: authorizationStatus.rawValue = \(raw)")
             print("contacts-status: contactsReadAllowed = \(MessagesStoreImporter.contactsReadAllowed())")
+            // How many contacts this process can actually fetch. If authz reports
+            // granted but this is 0 (or throws), the problem is a TCC signing/
+            // attribution issue, not app logic — the fix would be elsewhere.
+            var fetched = 0
+            let request = CNContactFetchRequest(keysToFetch: [CNContactIdentifierKey as CNKeyDescriptor])
+            do {
+                try CNContactStore().enumerateContacts(with: request) { _, _ in fetched += 1 }
+                print("contacts-status: fetchable contacts = \(fetched)")
+            } catch {
+                print("contacts-status: fetch failed: \(error.localizedDescription)")
+            }
             exit(EXIT_SUCCESS)
         }
 

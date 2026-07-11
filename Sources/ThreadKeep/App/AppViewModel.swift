@@ -80,6 +80,8 @@ final class AppViewModel: ObservableObject {
     private var mergedThreadComponentsByVisibleID: [String: [String]] = [:]
     private var visibleThreadIDByRawThreadID: [String: String] = [:]
     private var visibleThreadTitleByID: [String: String] = [:]
+    private var contactsActivationObserver: NSObjectProtocol?
+    private var lastContactsReadable = false
 
     init(
         store: ArchiveStore,
@@ -154,9 +156,53 @@ final class AppViewModel: ObservableObject {
         requiresExplicitThreadSelectionAfterLaunch = true
         selectedThreadID = nil
         resetSessionForPrivacy()
+        startContactsAuthorizationMonitoring()
 
         if initialAppFlow == .determining {
             initialAppFlow = .welcome
+        }
+    }
+
+    /// Watch for the app regaining focus (e.g. the user returning from System
+    /// Settings after granting Contacts access) so a grant made while ThreadKeep
+    /// is already running takes effect without a relaunch. `authorizationStatus`
+    /// is read fresh per call, but nothing else observes OS permission changes,
+    /// so before this the "Contacts access is off" state persisted until the app
+    /// was relaunched.
+    private func startContactsAuthorizationMonitoring() {
+        guard contactsActivationObserver == nil else { return }
+        lastContactsReadable = MessagesStoreImporter.contactsReadAllowed()
+        contactsActivationObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.didBecomeActiveNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.recheckContactsAuthorizationOnActivation()
+            }
+        }
+    }
+
+    /// On app activation, re-read Contacts authorization. If it flipped from
+    /// not-readable to readable (authorized or the macOS limited tier) while we
+    /// were running, rebuild the contact indexes and re-resolve the thread list
+    /// and open conversation so names/photos populate immediately. Fires only on
+    /// the off→on transition to avoid reloading on every focus change.
+    private func recheckContactsAuthorizationOnActivation() {
+        let useContactsNames = UserDefaults.standard.object(forKey: "threadkeep.import.useContactsNames") as? Bool ?? true
+        let readable = MessagesStoreImporter.contactsReadAllowed()
+        defer { lastContactsReadable = readable }
+        guard useContactsNames, readable, !lastContactsReadable else { return }
+
+        Task {
+            await libraryContactsResolver.refresh(enabled: true, requestAccessIfNeeded: false)
+            await refreshLibrary(autoSelect: false)
+            // The sidebar and the open conversation each re-resolve their own
+            // resolver on this notification.
+            NotificationCenter.default.post(
+                name: .threadKeepContactsAccessDidChange,
+                object: MessagesContactAccessState.authorized
+            )
         }
     }
 
