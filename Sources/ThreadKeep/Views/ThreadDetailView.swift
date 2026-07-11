@@ -709,9 +709,18 @@ private struct ChatBubbleShape: Shape {
 
 private extension NSColor {
     /// AppKit doesn't expose UIKit's semantic `secondarySystemBackground`, so mirror it
-    /// with a slightly lifted control background that stays distinct from the window.
+    /// with an explicit dynamic color. The previous `highlight(withLevel:)` blend
+    /// resolved to a STATIC color at evaluation time, so incoming bubbles stayed
+    /// dark after switching to light mode and their dark `.primary` text became
+    /// unreadable. A name-based dynamic provider re-resolves on every draw, so
+    /// mid-session appearance changes track correctly. Values approximate
+    /// Messages.app's incoming-bubble grays in each appearance.
     static var secondarySystemBackground: NSColor {
-        controlBackgroundColor.highlight(withLevel: 0.14) ?? controlBackgroundColor
+        NSColor(name: nil) { appearance in
+            appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+                ? NSColor(calibratedWhite: 0.235, alpha: 1.0)
+                : NSColor(calibratedWhite: 0.925, alpha: 1.0)
+        }
     }
 }
 
