@@ -133,9 +133,29 @@ struct MessagesStoreImporter: Sendable {
             return .notDetermined
         case .denied, .restricted:
             return .denied
-        @unknown default:
-            return .unavailable
+        default:
+            // A newer macOS can report a "limited access" tier (rawValue 4)
+            // that this SDK's CNAuthorizationStatus doesn't name on macOS, so it
+            // lands here. It still permits reading the shared subset — treat it
+            // as authorized. The prior `@unknown default → .unavailable` hid
+            // EVERY contact name and photo for anyone on limited access.
+            return contactsReadAllowed() ? .authorized : .unavailable
         }
+    }
+
+    /// CNAuthorizationStatus.limited (selected-subset access) is marked
+    /// unavailable on macOS in current SDKs, but a newer macOS can still return
+    /// its raw value (4) at runtime — which lands in `@unknown default`. Compare
+    /// by rawValue so we recognize it without referencing the unavailable symbol.
+    static let limitedAuthorizationRawValue = 4
+
+    /// Whether the Contacts store can actually be read — full authorization, or
+    /// the limited (selected-subset) tier a newer macOS may report. Both the
+    /// display resolver and the import resolver gate on this so they never
+    /// diverge. Treating limited as no-access hid every name/photo.
+    static func contactsReadAllowed() -> Bool {
+        let status = CNContactStore.authorizationStatus(for: .contacts)
+        return status == .authorized || status.rawValue == limitedAuthorizationRawValue
     }
 
     static func requestContactAccessIfNeeded(enabled: Bool = true) async -> MessagesContactAccessState {
@@ -955,7 +975,7 @@ private final class MessagesContactResolver {
     private let contactIdentifierIndex: [String: String]
 
     init(enabled: Bool = true) {
-        guard enabled, CNContactStore.authorizationStatus(for: .contacts) == .authorized else {
+        guard enabled, MessagesStoreImporter.contactsReadAllowed() else {
             phoneIndex = [:]
             emailIndex = [:]
             contactIdentifierIndex = [:]

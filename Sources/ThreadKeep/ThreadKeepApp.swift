@@ -1,4 +1,5 @@
 import AppKit
+import Contacts
 import SwiftUI
 
 final class ThreadKeepApplicationDelegate: NSObject, NSApplicationDelegate {
@@ -146,6 +147,16 @@ struct ThreadKeepApp: App {
     @StateObject private var updater = AppUpdater()
 
     init() {
+        if CommandLine.arguments.contains("--contacts-status") {
+            // Diagnostic: print the raw Contacts authorization value under this
+            // app's own identity, then exit. 0=notDetermined 1=restricted
+            // 2=denied 3=authorized 4=limited(newer macOS).
+            let raw = CNContactStore.authorizationStatus(for: .contacts).rawValue
+            print("contacts-status: authorizationStatus.rawValue = \(raw)")
+            print("contacts-status: contactsReadAllowed = \(MessagesStoreImporter.contactsReadAllowed())")
+            exit(EXIT_SUCCESS)
+        }
+
         if CommandLine.arguments.contains("--audit-suffix10") || CommandLine.arguments.contains("--audit-suffix10-reveal") {
             let reveal = CommandLine.arguments.contains("--audit-suffix10-reveal")
             // Block launch until the read-only audit finishes, then exit
