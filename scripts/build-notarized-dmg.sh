@@ -39,7 +39,7 @@ DMG_PATH="$DIST_DIR/$PRODUCT_NAME-$VERSION_LABEL.dmg"
 # release MUST ship a strictly higher value. Bump BOTH:
 #   - CFBundleVersion in Sources/ThreadKeep/Support/ThreadKeepInfo.plist
 #   - LAST_SHIPPED_BUNDLE_VERSION below (to the value you just shipped, after release)
-LAST_SHIPPED_BUNDLE_VERSION="${LAST_SHIPPED_BUNDLE_VERSION:-3}"   # 1.0b3 shipped as CFBundleVersion 3
+LAST_SHIPPED_BUNDLE_VERSION="${LAST_SHIPPED_BUNDLE_VERSION:-4}"   # 1.0b4 shipped as CFBundleVersion 4
 BUNDLE_VERSION="$(/usr/libexec/PlistBuddy -c 'Print CFBundleVersion' "$PLIST_PATH")"
 if [[ "${1:-}" != "--dry-run" ]] && [[ "$BUNDLE_VERSION" -le "$LAST_SHIPPED_BUNDLE_VERSION" ]]; then
     echo "CFBundleVersion is $BUNDLE_VERSION but $LAST_SHIPPED_BUNDLE_VERSION already shipped." >&2
