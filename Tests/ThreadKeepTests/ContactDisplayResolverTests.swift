@@ -136,30 +136,26 @@ struct ContactDisplayResolverTests {
 }
 
 @MainActor
+// Index keys mirror what the index builders emit: exactly one canonical key
+// per number (ContactDisplayResolver.canonicalPhoneKey), lowercased emails.
 private func makeResolver() -> ContactDisplayResolver {
     ContactDisplayResolver(
         phoneIndex: [
-            "15551234567": "Jane Doe",
             "5551234567": "Jane Doe",
-            "15559999999": "Jane Doe",
             "5559999999": "Jane Doe",
-            "15558887777": "Ryan Miller",
             "5558887777": "Ryan Miller"
         ],
         emailIndex: [
             "jane@example.com": "Jane Doe"
         ],
         contactIdentifierIndex: [
-            "15551234567": "ABC-123",
             "5551234567": "ABC-123",
             "jane@example.com": "ABC-123",
-            "15559999999": "DEF-456",
             "5559999999": "DEF-456",
-            "15558887777": "GHI-789",
             "5558887777": "GHI-789"
         ],
         imageIndex: [
-            "15551234567": Data([0x01])
+            "5551234567": Data([0x01])
         ],
         isReady: true
     )

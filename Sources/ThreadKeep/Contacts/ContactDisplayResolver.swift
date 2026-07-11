@@ -359,17 +359,25 @@ final class ContactDisplayResolver: ObservableObject {
         )
     }
 
-    private func baseIdentifier(from value: String) -> String {
-        guard let parsed = Self.parseDecoratedLabel(value) else {
+    /// Recovers the raw handle from a stored participant label ("Name (handle)"
+    /// or a bare handle). Static so the read-only suffix-10 audit can parse
+    /// stored labels without a resolver instance; instance resolution goes
+    /// through the same logic via baseIdentifier(from:).
+    nonisolated static func storedHandle(fromParticipantLabel value: String) -> String {
+        guard let parsed = parseDecoratedLabel(value) else {
             return value.trimmed
         }
 
-        let innerBase = baseIdentifier(from: parsed.inner)
-        if Self.looksLikeHandle(innerBase) || Self.parseDecoratedLabel(innerBase) != nil {
+        let innerBase = storedHandle(fromParticipantLabel: parsed.inner)
+        if looksLikeHandle(innerBase) || parseDecoratedLabel(innerBase) != nil {
             return innerBase
         }
 
         return value.trimmed
+    }
+
+    private func baseIdentifier(from value: String) -> String {
+        Self.storedHandle(fromParticipantLabel: value)
     }
 
     private func decoratedName(from value: String) -> String? {
@@ -540,33 +548,41 @@ final class ContactDisplayResolver: ObservableObject {
     }
 
     nonisolated static func phoneLookupKeys(for value: String) -> [String] {
-        let digits = value.filter(\.isNumber)
-        guard !digits.isEmpty else {
+        guard let key = canonicalPhoneKey(for: value) else {
             return []
         }
+        return [key]
+    }
 
-        var keys: [String] = []
-
-        func append(_ candidate: String) {
-            guard !candidate.isEmpty, !keys.contains(candidate) else { return }
-            keys.append(candidate)
+    /// Strict phone equivalence: two handles are the same number ONLY when their
+    /// canonical forms match. The canonical form applies exactly three rules:
+    ///   1. compare digit strings exactly;
+    ///   2. international dialing notation: a leading `00` is dropped only when
+    ///      at least 11 digits remain, so the result still carries its country
+    ///      code (`0044…` == `+44…`) and can never shrink to a bare national
+    ///      number that might belong to a different country;
+    ///   3. NANP: an 11-digit string is reduced to 10 only when it leads with
+    ///      `1` (the NANP country code) — `+1 914…` == `914…`.
+    /// Every rule maps notations of the SAME E.164 number onto each other; no
+    /// rule deletes a country code. The previous last-10-digits fallback did,
+    /// and could merge two different people (a UK `+44 7911 123456` card would
+    /// capture a US `791-112-3456` handle). Do not add fuzzier keys — the
+    /// mutation tests in ContactDisplayResolverTests pin the exact key sets.
+    nonisolated static func canonicalPhoneKey(for value: String) -> String? {
+        var digits = value.filter(\.isNumber)
+        guard !digits.isEmpty else {
+            return nil
         }
 
-        append(digits)
+        if digits.hasPrefix("00"), digits.count >= 13 {
+            digits = String(digits.dropFirst(2))
+        }
 
         if digits.count == 11, digits.hasPrefix("1") {
-            append(String(digits.dropFirst()))
+            digits = String(digits.dropFirst())
         }
 
-        if digits.count > 10 {
-            append(String(digits.suffix(10)))
-        }
-
-        if digits.hasPrefix("001"), digits.count > 3 {
-            append(String(digits.dropFirst(2)))
-        }
-
-        return keys
+        return digits
     }
 
     nonisolated private static func looksLikeHandleList(_ value: String) -> Bool {

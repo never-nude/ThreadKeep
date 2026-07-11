@@ -1063,34 +1063,11 @@ private final class MessagesContactResolver {
         email.trimmed.lowercased()
     }
 
+    // Import-time and display-time resolution MUST share one definition of
+    // phone equivalence — a mismatch would bake one identity into the archive
+    // and group threads by another. See canonicalPhoneKey for the rules.
     private static func phoneLookupKeys(for value: String) -> [String] {
-        let digits = value.filter(\.isNumber)
-        guard !digits.isEmpty else {
-            return []
-        }
-
-        var keys: [String] = []
-
-        func append(_ candidate: String) {
-            guard !candidate.isEmpty, !keys.contains(candidate) else { return }
-            keys.append(candidate)
-        }
-
-        append(digits)
-
-        if digits.count == 11, digits.hasPrefix("1") {
-            append(String(digits.dropFirst()))
-        }
-
-        if digits.count > 10 {
-            append(String(digits.suffix(10)))
-        }
-
-        if digits.hasPrefix("001"), digits.count > 3 {
-            append(String(digits.dropFirst(2)))
-        }
-
-        return keys
+        ContactDisplayResolver.phoneLookupKeys(for: value)
     }
 }
 
