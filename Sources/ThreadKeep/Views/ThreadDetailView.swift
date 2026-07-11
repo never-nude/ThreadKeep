@@ -734,7 +734,9 @@ private struct HighlightedMessageTextView: View {
                     piece.backgroundColor = SearchHighlightStyle.activeFill
                     piece.foregroundColor = SearchHighlightStyle.activeText
                 } else {
-                    piece.backgroundColor = isOutgoing ? Color.white.opacity(0.2) : Color.yellow.opacity(0.35)
+                    // Softer than the active amber so the current result
+                    // always dominates visually.
+                    piece.backgroundColor = isOutgoing ? Color.white.opacity(0.16) : Color.yellow.opacity(0.25)
                 }
             }
             result.append(piece)
