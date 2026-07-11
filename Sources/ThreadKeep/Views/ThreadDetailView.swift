@@ -585,9 +585,13 @@ private struct MessageBubbleView: View {
                                 radius: cornerRadius,
                                 isLastInRun: isLastInRun
                             )
-                                .stroke(Color.accentColor.opacity(0.55), lineWidth: 2)
+                                .stroke(SearchHighlightStyle.activeStroke.opacity(0.8), lineWidth: 2)
                         }
                     }
+                    .shadow(
+                        color: isFocused ? SearchHighlightStyle.activeGlow.opacity(0.35) : .clear,
+                        radius: isFocused ? 5 : 0
+                    )
 
                 Text(AppFormatters.preciseMessageTime.string(from: message.timestamp))
                     .font(.system(size: 10, weight: .regular).monospacedDigit())
@@ -632,7 +636,8 @@ private struct MessageBubbleView: View {
                 HighlightedMessageTextView(
                     text: message.bodyText,
                     query: searchQuery,
-                    isOutgoing: message.isOutgoing
+                    isOutgoing: message.isOutgoing,
+                    isActiveResult: isFocused
                 )
             }
 
@@ -689,10 +694,22 @@ private extension NSColor {
     }
 }
 
+/// Search-highlight palette. The active match is a warm amber "highlighter"
+/// with forced dark text so it stays readable on light and dark backgrounds
+/// and inside outgoing (colored) bubbles alike. The bubble-level stroke and
+/// glow give the active match a non-color distinction as well.
+enum SearchHighlightStyle {
+    static let activeFill = Color(red: 1.0, green: 0.76, blue: 0.25)
+    static let activeText = Color.black.opacity(0.88)
+    static let activeStroke = Color(red: 0.93, green: 0.62, blue: 0.12)
+    static let activeGlow = Color(red: 1.0, green: 0.72, blue: 0.20)
+}
+
 private struct HighlightedMessageTextView: View {
     let text: String
     let query: String
     let isOutgoing: Bool
+    let isActiveResult: Bool
 
     var body: some View {
         Text(attributedText)
@@ -713,7 +730,12 @@ private struct HighlightedMessageTextView: View {
                 piece.underlineStyle = .single
             }
             if segment.isHighlighted {
-                piece.backgroundColor = isOutgoing ? Color.white.opacity(0.2) : Color.yellow.opacity(0.35)
+                if isActiveResult {
+                    piece.backgroundColor = SearchHighlightStyle.activeFill
+                    piece.foregroundColor = SearchHighlightStyle.activeText
+                } else {
+                    piece.backgroundColor = isOutgoing ? Color.white.opacity(0.2) : Color.yellow.opacity(0.35)
+                }
             }
             result.append(piece)
         }
