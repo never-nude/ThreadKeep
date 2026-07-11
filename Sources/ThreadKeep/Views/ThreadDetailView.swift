@@ -593,24 +593,29 @@ private struct MessageBubbleView: View {
                                 radius: cornerRadius,
                                 isLastInRun: isLastInRun
                             )
-                                .stroke(SearchHighlightStyle.activeStroke.opacity(0.8), lineWidth: 2)
+                                .stroke(SearchHighlightStyle.activeStroke, lineWidth: 2.5)
                         }
                     }
                     .shadow(
-                        color: isFocused ? SearchHighlightStyle.activeGlow.opacity(isArrivalPulsing ? 0.6 : 0.35) : .clear,
+                        color: isFocused ? SearchHighlightStyle.activeGlow.opacity(isArrivalPulsing ? 0.6 : 0.4) : .clear,
                         radius: isFocused ? (isArrivalPulsing ? 10 : 5) : 0
                     )
-                    .onChange(of: isFocused) { _, focused in
-                        guard focused, !reduceMotion else {
+                    // .task(id:) runs on the INITIAL value too, so a bubble that
+                    // is lazily created already-focused (the common case when
+                    // navigating to a match in an offscreen day group) still
+                    // pulses — an .onChange would miss that initial state. It is
+                    // also auto-cancelled when isFocused changes, so rapid
+                    // navigation supersedes cleanly with no stale timer.
+                    .task(id: isFocused) {
+                        guard isFocused, !reduceMotion else {
                             isArrivalPulsing = false
                             return
                         }
                         isArrivalPulsing = true
-                        Task { @MainActor in
-                            try? await Task.sleep(nanoseconds: 80_000_000)
-                            withAnimation(.easeOut(duration: 0.5)) {
-                                isArrivalPulsing = false
-                            }
+                        try? await Task.sleep(nanoseconds: 80_000_000)
+                        guard !Task.isCancelled else { return }
+                        withAnimation(.easeOut(duration: 0.5)) {
+                            isArrivalPulsing = false
                         }
                     }
 
@@ -724,14 +729,23 @@ private extension NSColor {
     }
 }
 
-/// Search-highlight palette. The active match is a warm amber "highlighter"
-/// with forced dark text so it stays readable on light and dark backgrounds
-/// and inside outgoing (colored) bubbles alike. The bubble-level stroke and
-/// glow give the active match a non-color distinction as well.
+/// Search-highlight palette. Both the active and secondary matches use a warm
+/// amber highlighter with forced dark text, so matched words stay legible on
+/// any background — light or dark bubbles and colored outgoing bubbles alike.
+/// (A translucent tint like the old white-on-blue secondary was nearly
+/// invisible in outgoing bubbles.) The active match is distinguished by a
+/// fully-saturated fill plus a bubble-level stroke and glow — shape and
+/// emphasis, not color alone — so it always dominates.
 enum SearchHighlightStyle {
     static let activeFill = Color(red: 1.0, green: 0.76, blue: 0.25)
     static let activeText = Color.black.opacity(0.88)
-    static let activeStroke = Color(red: 0.93, green: 0.62, blue: 0.12)
+    /// Paler amber for non-active matches; still opaque enough to read dark
+    /// text on, on top of a blue outgoing bubble.
+    static let secondaryFill = Color(red: 1.0, green: 0.87, blue: 0.5).opacity(0.85)
+    static let secondaryText = Color.black.opacity(0.8)
+    /// Full-strength, slightly darker amber so the 2.5px active outline meets
+    /// the non-text contrast minimum against light backgrounds too.
+    static let activeStroke = Color(red: 0.85, green: 0.5, blue: 0.05)
     static let activeGlow = Color(red: 1.0, green: 0.72, blue: 0.20)
 }
 
@@ -764,9 +778,11 @@ private struct HighlightedMessageTextView: View {
                     piece.backgroundColor = SearchHighlightStyle.activeFill
                     piece.foregroundColor = SearchHighlightStyle.activeText
                 } else {
-                    // Softer than the active amber so the current result
-                    // always dominates visually.
-                    piece.backgroundColor = isOutgoing ? Color.white.opacity(0.16) : Color.yellow.opacity(0.25)
+                    // Paler amber than the active fill (so the current result
+                    // dominates) but still legible dark-on-amber on every
+                    // bubble, including outgoing blue.
+                    piece.backgroundColor = SearchHighlightStyle.secondaryFill
+                    piece.foregroundColor = SearchHighlightStyle.secondaryText
                 }
             }
             result.append(piece)
