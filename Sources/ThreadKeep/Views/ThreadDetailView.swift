@@ -743,9 +743,19 @@ enum SearchHighlightStyle {
     /// text on, on top of a blue outgoing bubble.
     static let secondaryFill = Color(red: 1.0, green: 0.87, blue: 0.5).opacity(0.85)
     static let secondaryText = Color.black.opacity(0.8)
-    /// Full-strength, slightly darker amber so the 2.5px active outline meets
-    /// the non-text contrast minimum against light backgrounds too.
-    static let activeStroke = Color(red: 0.85, green: 0.5, blue: 0.05)
+    /// Full-strength amber outline for the active match, appearance-adaptive
+    /// so the 2.5px stroke clears the WCAG 3:1 non-text minimum in BOTH modes.
+    /// A single static amber can't: dark enough for a light incoming bubble
+    /// (0.925 gray) reads too dim on a dark one. Light mode uses a darker
+    /// burnt amber (3.75:1 vs the light bubble, up from 2.53:1); dark mode
+    /// keeps the brighter amber (3.69:1 vs the dark bubble). The name-based
+    /// NSColor re-resolves per draw, so it tracks mid-session appearance
+    /// changes — same pattern as secondarySystemBackground above.
+    static let activeStroke = Color(nsColor: NSColor(name: nil) { appearance in
+        appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            ? NSColor(calibratedRed: 0.85, green: 0.5, blue: 0.05, alpha: 1.0)
+            : NSColor(calibratedRed: 0.72, green: 0.38, blue: 0.0, alpha: 1.0)
+    })
     static let activeGlow = Color(red: 1.0, green: 0.72, blue: 0.20)
 }
 
