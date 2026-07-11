@@ -413,6 +413,10 @@ final class ContactDisplayResolver: ObservableObject {
         return value.lowercased()
     }
 
+    // handle: identity uses the same canonical phone form as contact lookup,
+    // so notation variants of one number (+1/bare/00-prefixed) share a key
+    // whether or not a Contacts card exists. Strictly notation-level — see
+    // canonicalPhoneKey for why this cannot equate two different numbers.
     private func normalizedHandleKey(_ value: String) -> String {
         let trimmed = value.trimmed
         guard !trimmed.isEmpty else { return trimmed }
@@ -421,12 +425,8 @@ final class ContactDisplayResolver: ObservableObject {
             return Self.normalizedEmail(trimmed)
         }
 
-        let digits = trimmed.filter(\.isNumber)
-        if !digits.isEmpty {
-            if digits.count == 11, digits.hasPrefix("1") {
-                return String(digits.dropFirst())
-            }
-            return trimmed.hasPrefix("+") ? "+\(digits)" : digits
+        if let phoneKey = Self.canonicalPhoneKey(for: trimmed) {
+            return phoneKey
         }
 
         return trimmed.lowercased()
@@ -466,10 +466,7 @@ final class ContactDisplayResolver: ObservableObject {
     nonisolated private static func loadContactIndexes() async -> ([String: String], [String: String], [String: String], [String: Data]) {
         await Task.detached(priority: .userInitiated) {
             let store = CNContactStore()
-            var phoneIndex: [String: String] = [:]
-            var emailIndex: [String: String] = [:]
-            var idIndex: [String: String] = [:]
-            var imageIndex: [String: Data] = [:]
+            var builder = ContactIndexBuilder()
             let keysToFetch: [CNKeyDescriptor] = [
                 CNContactIdentifierKey as CNKeyDescriptor,
                 CNContactFormatter.descriptorForRequiredKeys(for: .fullName),
@@ -489,33 +486,20 @@ final class ContactDisplayResolver: ObservableObject {
                         return
                     }
 
-                    let contactImage = contact.thumbnailImageData ?? (contact.imageDataAvailable ? contact.imageData : nil)
-
-                    for phoneNumber in contact.phoneNumbers {
-                        for key in phoneLookupKeys(for: phoneNumber.value.stringValue) {
-                            phoneIndex[key] = phoneIndex[key] ?? displayName
-                            idIndex[key] = idIndex[key] ?? contact.identifier
-                            if let contactImage, imageIndex[key] == nil {
-                                imageIndex[key] = contactImage
-                            }
-                        }
-                    }
-
-                    for email in contact.emailAddresses {
-                        let key = normalizedEmail(String(email.value))
-                        guard !key.isEmpty else { continue }
-                        emailIndex[key] = emailIndex[key] ?? displayName
-                        idIndex[key] = idIndex[key] ?? contact.identifier
-                        if let contactImage, imageIndex[key] == nil {
-                            imageIndex[key] = contactImage
-                        }
-                    }
+                    builder.add(
+                        contactIdentifier: contact.identifier,
+                        displayName: displayName,
+                        phoneNumbers: contact.phoneNumbers.map { $0.value.stringValue },
+                        emailAddresses: contact.emailAddresses.map { String($0.value) },
+                        image: contact.thumbnailImageData ?? (contact.imageDataAvailable ? contact.imageData : nil)
+                    )
                 }
             } catch {
                 return ([:], [:], [:], [:])
             }
 
-            return (phoneIndex, emailIndex, idIndex, imageIndex)
+            let indexes = builder.finalize()
+            return (indexes.phoneIndex, indexes.emailIndex, indexes.contactIdentifierIndex, indexes.imageIndex)
         }.value
     }
 

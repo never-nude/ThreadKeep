@@ -1092,14 +1092,11 @@ final class AppViewModel: ObservableObject {
 
         for thread in rawThreads {
             let participants = libraryContactsResolver.uniqueParticipants(from: thread.participantNames, excludingYou: true)
-            guard participants.count == 1,
-                  let participant = participants.first,
-                  participant.canonicalKey.hasPrefix("contact:")
-            else {
+            guard let mergeKey = ThreadMergeGrouping.mergeKey(for: participants) else {
                 passthroughThreads.append(thread)
                 continue
             }
-            groupedDirectThreads[participant.canonicalKey, default: []].append(thread)
+            groupedDirectThreads[mergeKey, default: []].append(thread)
         }
 
         var mergedThreadComponents: [String: [String]] = [:]

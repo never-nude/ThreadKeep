@@ -963,9 +963,7 @@ private final class MessagesContactResolver {
         }
 
         let store = CNContactStore()
-        var phoneIndex: [String: String] = [:]
-        var emailIndex: [String: String] = [:]
-        var contactIdentifierIndex: [String: String] = [:]
+        var builder = ContactIndexBuilder()
         let keysToFetch: [CNKeyDescriptor] = [
             CNContactIdentifierKey as CNKeyDescriptor,
             CNContactFormatter.descriptorForRequiredKeys(for: .fullName),
@@ -982,29 +980,21 @@ private final class MessagesContactResolver {
                     return
                 }
 
-                for phoneNumber in contact.phoneNumbers {
-                    for key in Self.phoneLookupKeys(for: phoneNumber.value.stringValue) {
-                        phoneIndex[key] = phoneIndex[key] ?? displayName
-                        contactIdentifierIndex[key] = contactIdentifierIndex[key] ?? contact.identifier
-                    }
-                }
-
-                for email in contact.emailAddresses {
-                    let key = Self.normalizedEmail(String(email.value))
-                    guard !key.isEmpty else { continue }
-                    emailIndex[key] = emailIndex[key] ?? displayName
-                    contactIdentifierIndex[key] = contactIdentifierIndex[key] ?? contact.identifier
-                }
+                builder.add(
+                    contactIdentifier: contact.identifier,
+                    displayName: displayName,
+                    phoneNumbers: contact.phoneNumbers.map { $0.value.stringValue },
+                    emailAddresses: contact.emailAddresses.map { String($0.value) }
+                )
             }
         } catch {
-            phoneIndex = [:]
-            emailIndex = [:]
-            contactIdentifierIndex = [:]
+            builder = ContactIndexBuilder()
         }
 
-        self.phoneIndex = phoneIndex
-        self.emailIndex = emailIndex
-        self.contactIdentifierIndex = contactIdentifierIndex
+        let indexes = builder.finalize()
+        self.phoneIndex = indexes.phoneIndex
+        self.emailIndex = indexes.emailIndex
+        self.contactIdentifierIndex = indexes.contactIdentifierIndex
     }
 
     func contactName(for identifier: String) -> String? {

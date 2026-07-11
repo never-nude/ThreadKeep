@@ -102,7 +102,7 @@ enum Suffix10Audit {
     /// database. Read-only on both. Prints counts only — no names, numbers,
     /// or titles ever reach stdout.
     static func runOnLibraryAndPrint() async {
-        guard MessagesStoreImporter.currentContactAccessState() == .authorized else {
+        guard await MessagesStoreImporter.requestContactAccessIfNeeded() == .authorized else {
             print("suffix10-audit: Contacts access not authorized — nothing to audit (legacy and strict both resolve no contacts without access).")
             return
         }
