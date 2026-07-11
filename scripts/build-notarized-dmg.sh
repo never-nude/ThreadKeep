@@ -29,6 +29,9 @@ PRODUCT_NAME="ThreadKeep"
 APP_BUNDLE="$DIST_DIR/$PRODUCT_NAME.app"
 PLIST_PATH="$ROOT_DIR/Sources/ThreadKeep/Support/ThreadKeepInfo.plist"
 ICON_PATH="$ROOT_DIR/Sources/ThreadKeep/Support/ThreadKeep.icns"
+# Hardened runtime gates Contacts access behind this entitlement even after a
+# TCC grant, so the app bundle MUST be signed with it or CNContactStore is empty.
+ENTITLEMENTS_PATH="$ROOT_DIR/Sources/ThreadKeep/Support/ThreadKeep.entitlements"
 
 VERSION_LABEL="${VERSION_LABEL:-1.0b2}"
 SIGN_IDENTITY="${SIGN_IDENTITY:-Developer ID Application}"
@@ -119,12 +122,14 @@ sign_sparkle_nested() {
 if [[ $DRY_RUN -eq 1 ]]; then
     echo "==> [dry run] Ad-hoc signing (no hardened runtime, no notarization)"
     sign_sparkle_nested --force --sign -
-    codesign --force --sign - "$APP_BUNDLE"
+    # Nested Sparkle components don't get the app entitlements (they don't touch
+    # Contacts); only the outer app bundle does.
+    codesign --force --entitlements "$ENTITLEMENTS_PATH" --sign - "$APP_BUNDLE"
     codesign --verify --deep --strict "$APP_BUNDLE"
 else
     echo "==> Signing with '$SIGN_IDENTITY' (hardened runtime + secure timestamp)"
     sign_sparkle_nested --force --timestamp --options runtime --sign "$SIGN_IDENTITY"
-    codesign --force --timestamp --options runtime --sign "$SIGN_IDENTITY" "$APP_BUNDLE"
+    codesign --force --timestamp --options runtime --entitlements "$ENTITLEMENTS_PATH" --sign "$SIGN_IDENTITY" "$APP_BUNDLE"
     codesign --verify --deep --strict "$APP_BUNDLE"
 fi
 
