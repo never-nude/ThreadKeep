@@ -155,11 +155,43 @@ struct RootView: View {
                         openImportFlow(mode: .all, returnToWelcomeAfterDismiss: false)
                     }
                 } else {
-                    ContentUnavailableView(
-                        "Your Messages Library",
-                        systemImage: "tray",
-                        description: Text("Choose a conversation on the left, or use search to find one.")
-                    )
+                    VStack(spacing: 24) {
+                        Spacer()
+
+                        Image(systemName: "tray")
+                            .font(.system(size: 44))
+                            .foregroundStyle(.secondary)
+
+                        VStack(spacing: 6) {
+                            Text("Your Messages Library")
+                                .font(.title2.weight(.semibold))
+
+                            Text("Choose a conversation on the left, or use search to find one.")
+                                .font(.callout)
+                                .foregroundStyle(.secondary)
+                        }
+
+                        VStack(spacing: 10) {
+                            Button {
+                                viewModel.beginWiFiSyncToIPhone()
+                            } label: {
+                                Label("Send Library to iPhone", systemImage: "iphone")
+                                    .font(.headline)
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 4)
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .controlSize(.large)
+                            .disabled(viewModel.threads.isEmpty || viewModel.isBusy)
+
+                            Text("Every conversation goes straight to ThreadKeep on your iPhone over Wi-Fi.")
+                                .font(.callout)
+                                .foregroundStyle(.secondary)
+                        }
+
+                        Spacer()
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
             .background(Color(nsColor: .windowBackgroundColor))
@@ -174,6 +206,24 @@ struct RootView: View {
                 .labelStyle(.iconOnly)
                 .help("Show the welcome screen")
                 .accessibilityLabel("Home")
+
+                Menu {
+                    Button("Send Entire Library…") {
+                        viewModel.beginWiFiSyncToIPhone()
+                    }
+                    .disabled(viewModel.threads.isEmpty)
+
+                    Button("Send This Conversation…") {
+                        viewModel.beginWiFiSyncToIPhoneForSelection()
+                    }
+                    .disabled(viewModel.selectedThread == nil)
+                } label: {
+                    Label("Send to iPhone", systemImage: "iphone")
+                }
+                .labelStyle(.iconOnly)
+                .disabled(viewModel.isBusy)
+                .help("Send conversations to ThreadKeep on your iPhone over Wi-Fi")
+                .accessibilityLabel("Send to iPhone")
 
                 Menu {
                     Button("Export PDF") {

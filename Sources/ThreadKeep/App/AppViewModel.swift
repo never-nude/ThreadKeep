@@ -976,7 +976,19 @@ final class AppViewModel: ObservableObject {
     /// as a mobile archive; threads whose export fails are skipped rather than
     /// failing the whole transfer, so the count the phone sees is the count
     /// actually sent.
-    func beginWiFiSyncToIPhone() {
+    enum WiFiSyncScope: Equatable {
+        case entireLibrary
+        case threads([String])
+    }
+
+    func beginWiFiSyncToIPhoneForSelection() {
+        guard let selectedThreadID = selectedThread?.id else {
+            return
+        }
+        beginWiFiSyncToIPhone(scope: .threads([selectedThreadID]))
+    }
+
+    func beginWiFiSyncToIPhone(scope: WiFiSyncScope = .entireLibrary) {
         if let wifiSyncServer {
             // Already presenting; just make sure it's listening.
             wifiSyncServer.start()
@@ -985,7 +997,15 @@ final class AppViewModel: ObservableObject {
 
         let store = self.store
         let server = ThreadKeepWiFiSyncServer(archivesProvider: {
-            let summaries = try await store.loadThreadSummaries(filters: LibraryFilters())
+            let allSummaries = try await store.loadThreadSummaries(filters: LibraryFilters())
+            let summaries: [ThreadSummary]
+            switch scope {
+            case .entireLibrary:
+                summaries = allSummaries
+            case .threads(let threadIDs):
+                let wantedIDs = Set(threadIDs)
+                summaries = allSummaries.filter { wantedIDs.contains($0.id) }
+            }
             let exporter = ThreadKeepMobileArchiveExporter()
             var archives: [(name: String, data: Data)] = []
             archives.reserveCapacity(summaries.count)
