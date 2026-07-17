@@ -85,6 +85,25 @@ struct RootView: View {
         .sheet(isPresented: $isShowingContactSupport) {
             ContactSupportView()
         }
+        .onReceive(NotificationCenter.default.publisher(for: .threadKeepRequestWiFiSync)) { _ in
+            viewModel.beginWiFiSyncToIPhone()
+        }
+        .sheet(
+            isPresented: Binding(
+                get: { viewModel.wifiSyncServer != nil },
+                set: { isPresented in
+                    if !isPresented {
+                        viewModel.endWiFiSyncToIPhone()
+                    }
+                }
+            )
+        ) {
+            if let server = viewModel.wifiSyncServer {
+                IPhoneWiFiSyncView(server: server) {
+                    viewModel.endWiFiSyncToIPhone()
+                }
+            }
+        }
         .task {
             resetPrivacyLaunchStateForLaunch()
             applyInitialAppFlowIfNeeded(with: viewModel.initialAppFlow)
@@ -186,6 +205,13 @@ struct RootView: View {
 
                     Button("Export Library as JSON") {
                         Task { await viewModel.exportVisibleLibraryJSON() }
+                    }
+                    .disabled(viewModel.threads.isEmpty)
+
+                    Divider()
+
+                    Button("Send to iPhone over Wi-Fi…") {
+                        viewModel.beginWiFiSyncToIPhone()
                     }
                     .disabled(viewModel.threads.isEmpty)
                 } label: {
