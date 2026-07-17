@@ -35,7 +35,7 @@ struct IPhoneWiFiSyncView: View {
         switch server.state {
         case .finished, .failed, .stopped:
             return "Close"
-        case .waitingForPhone, .pairing, .sending:
+        case .waitingForPhone, .pairing, .preparing, .sending:
             return "Cancel"
         }
     }
@@ -47,6 +47,8 @@ struct IPhoneWiFiSyncView: View {
             waitingContent
         case let .pairing(deviceName, code):
             pairingContent(deviceName: deviceName, code: code)
+        case let .preparing(done, total):
+            preparingContent(done: done, total: total)
         case let .sending(sent, total, currentTitle):
             sendingContent(sent: sent, total: total, currentTitle: currentTitle)
         case let .finished(count):
@@ -103,6 +105,35 @@ struct IPhoneWiFiSyncView: View {
 
             Text("Type this code on your iPhone.")
                 .font(.body)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+        }
+    }
+
+    private func preparingContent(done: Int, total: Int) -> some View {
+        VStack(spacing: 18) {
+            Image(systemName: "shippingbox")
+                .font(.system(size: 40, weight: .medium))
+                .foregroundStyle(Color.accentColor)
+
+            Text("Getting your conversations ready")
+                .font(.title3.weight(.semibold))
+
+            if total > 0 {
+                ProgressView(value: Double(done), total: Double(max(total, 1)))
+                    .progressViewStyle(.linear)
+                    .frame(maxWidth: 300)
+
+                Text("Preparing \(done) of \(total)…")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            } else {
+                ProgressView()
+                    .controlSize(.small)
+            }
+
+            Text("Big libraries take a few minutes. Keep this window open — sending starts automatically.")
+                .font(.callout)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
         }

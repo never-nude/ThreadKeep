@@ -996,7 +996,7 @@ final class AppViewModel: ObservableObject {
         }
 
         let store = self.store
-        let server = ThreadKeepWiFiSyncServer(archivesProvider: {
+        let server = ThreadKeepWiFiSyncServer(archivesProvider: { progress in
             let allSummaries = try await store.loadThreadSummaries(filters: LibraryFilters())
             let summaries: [ThreadSummary]
             switch scope {
@@ -1009,7 +1009,11 @@ final class AppViewModel: ObservableObject {
             let exporter = ThreadKeepMobileArchiveExporter()
             var archives: [(name: String, data: Data)] = []
             archives.reserveCapacity(summaries.count)
-            for summary in summaries {
+            progress(0, summaries.count)
+            for (index, summary) in summaries.enumerated() {
+                defer {
+                    progress(index + 1, summaries.count)
+                }
                 do {
                     let data = try await store.exportThreadKeepArchiveData(for: summary.id)
                     archives.append((name: exporter.suggestedFilename(for: summary.title), data: data))

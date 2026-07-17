@@ -18,12 +18,13 @@ final class ThreadKeepWiFiSyncServer: ObservableObject {
         case stopped
         case waitingForPhone
         case pairing(deviceName: String, code: String)
+        case preparing(done: Int, total: Int)
         case sending(sent: Int, total: Int, currentTitle: String)
         case finished(count: Int)
         case failed(message: String)
     }
 
-    typealias ArchivesProvider = @Sendable () async throws -> [(name: String, data: Data)]
+    typealias ArchivesProvider = @Sendable (_ progress: @escaping @Sendable (Int, Int) -> Void) async throws -> [(name: String, data: Data)]
 
     @Published private(set) var state: State = .stopped
 
@@ -72,6 +73,8 @@ final class ThreadKeepWiFiSyncServer: ObservableObject {
             state = .waitingForPhone
         case let .pairing(deviceName, code):
             state = .pairing(deviceName: deviceName, code: code)
+        case let .preparing(done, total):
+            state = .preparing(done: done, total: total)
         case let .sending(sent, total, currentTitle):
             state = .sending(sent: sent, total: total, currentTitle: currentTitle)
         case let .finished(count):
@@ -91,6 +94,7 @@ final class ThreadKeepWiFiSyncEngine: @unchecked Sendable {
     enum Event: Sendable {
         case waitingForPhone
         case pairing(deviceName: String, code: String)
+        case preparing(done: Int, total: Int)
         case sending(sent: Int, total: Int, currentTitle: String)
         case finished(count: Int)
         case failed(message: String)
@@ -324,10 +328,21 @@ final class ThreadKeepWiFiSyncEngine: @unchecked Sendable {
         }
 
         phase = .preparingArchives
+        // Let the phone and the Mac sheet know the code was right before the
+        // (potentially long) export pass starts.
+        sendControl(["t": "accepted"])
+        emit(.preparing(done: 0, total: 0))
+
         let provider = archivesProvider
+        let progress: @Sendable (Int, Int) -> Void = { [weak self] done, total in
+            self?.queue.async {
+                guard let self, self.phase == .preparingArchives else { return }
+                self.emit(.preparing(done: done, total: total))
+            }
+        }
         Task { [weak self] in
             do {
-                let archives = try await provider()
+                let archives = try await provider(progress)
                 self?.queue.async {
                     self?.beginSending(archives: archives)
                 }
