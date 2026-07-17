@@ -577,6 +577,7 @@ private struct EmptyLibraryDetailView: View {
 }
 
 private struct IntroOnboardingView: View {
+    @State private var isShowingIPhoneAppQR = false
     @Binding var useContactsNames: Bool
     let beginImport: () -> Void
     let continueWithoutImporting: () -> Void
@@ -672,6 +673,16 @@ private struct IntroOnboardingView: View {
                     .buttonStyle(.borderedProminent)
                     .controlSize(.large)
                     .tint(.black)
+
+                    Button("Need the iPhone app? Show a code to scan") {
+                        isShowingIPhoneAppQR = true
+                    }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 12))
+                    .foregroundStyle(Color.accentColor)
+                    .popover(isPresented: $isShowingIPhoneAppQR) {
+                        IPhoneAppQRView()
+                    }
                 }
             }
             .padding(32)

@@ -80,6 +80,28 @@ struct IPhoneWiFiSyncView: View {
                     .foregroundStyle(.secondary)
             }
             .padding(.top, 8)
+
+            Divider()
+                .frame(maxWidth: 260)
+                .padding(.top, 6)
+
+            VStack(spacing: 8) {
+                Text("No ThreadKeep on the iPhone yet?")
+                    .font(.callout.weight(.medium))
+
+                if let qrImage = IPhoneAppQRView.qrImage(for: ThreadKeepAppLinks.iPhoneAppURL.absoluteString) {
+                    Image(nsImage: qrImage)
+                        .interpolation(.none)
+                        .resizable()
+                        .frame(width: 96, height: 96)
+                        .background(Color.white)
+                        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                }
+
+                Text("Point the iPhone's camera here to download it.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 
