@@ -629,19 +629,27 @@ private struct IntroOnboardingView: View {
                     .foregroundStyle(.secondary)
 
                 HStack(spacing: 12) {
-                    Button {
-                        beginImport()
-                    } label: {
-                        Label("Import Messages", systemImage: "tray.and.arrow.down.fill")
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.large)
-
                     if let sendToIPhone {
                         Button {
                             sendToIPhone()
                         } label: {
                             Label("Send Library to iPhone", systemImage: "iphone")
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.large)
+
+                        Button {
+                            beginImport()
+                        } label: {
+                            Label("Import Messages", systemImage: "tray.and.arrow.down.fill")
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.large)
+                    } else {
+                        Button {
+                            beginImport()
+                        } label: {
+                            Label("Import Messages", systemImage: "tray.and.arrow.down.fill")
                         }
                         .buttonStyle(.borderedProminent)
                         .controlSize(.large)
