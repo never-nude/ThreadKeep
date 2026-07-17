@@ -310,7 +310,7 @@ struct RootView: View {
                     isShowingWelcomeScreen = false
                 }
             },
-            sendToIPhone: viewModel.threads.isEmpty ? nil : {
+            sendToIPhone: !viewModel.hasStoredConversations ? nil : {
                 Task { @MainActor in
                     guard await unlockThreadKeepSession(reason: "ThreadKeep needs your Mac password before it can send conversations to your iPhone.") else {
                         return
@@ -628,38 +628,51 @@ private struct IntroOnboardingView: View {
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
 
-                HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 16) {
                     if let sendToIPhone {
-                        Button {
-                            sendToIPhone()
-                        } label: {
-                            Label("Send Library to iPhone", systemImage: "iphone")
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .controlSize(.large)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Button {
+                                sendToIPhone()
+                            } label: {
+                                Label("Send Library to iPhone", systemImage: "iphone")
+                                    .frame(maxWidth: 340)
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .controlSize(.large)
+                            .tint(.blue)
 
-                        Button {
-                            beginImport()
-                        } label: {
-                            Label("Import Messages", systemImage: "tray.and.arrow.down.fill")
+                            Text("Beams every saved conversation to ThreadKeep on your iPhone. No extra Mac permissions needed.")
+                                .font(.system(size: 12))
+                                .foregroundStyle(.secondary)
                         }
-                        .buttonStyle(.bordered)
-                        .controlSize(.large)
-                    } else {
-                        Button {
-                            beginImport()
-                        } label: {
-                            Label("Import Messages", systemImage: "tray.and.arrow.down.fill")
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .controlSize(.large)
                     }
-                }
 
-                Button("Open Without Importing Yet") {
-                    continueWithoutImporting()
+                    VStack(alignment: .leading, spacing: 4) {
+                        Button {
+                            beginImport()
+                        } label: {
+                            Label("Import Messages to This Mac", systemImage: "tray.and.arrow.down.fill")
+                                .frame(maxWidth: 340)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.large)
+                        .tint(Color(nsColor: .darkGray))
+
+                        Text("Adds conversations from Messages into your library. macOS asks for Full Disk Access first.")
+                            .font(.system(size: 12))
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Button {
+                        continueWithoutImporting()
+                    } label: {
+                        Text("Don't Import — Just Open")
+                            .frame(maxWidth: 340)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
+                    .tint(.black)
                 }
-                .font(.system(size: 12))
             }
             .padding(32)
             .frame(maxWidth: 680, alignment: .leading)

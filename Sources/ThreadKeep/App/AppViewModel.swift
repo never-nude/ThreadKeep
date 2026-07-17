@@ -36,7 +36,14 @@ final class AppViewModel: ObservableObject {
     static let defaultLibraryStatusMessage = "All your conversations in one place."
 
     @Published var libraryFilters = LibraryFilters()
-    @Published private(set) var threads: [ThreadSummary] = []
+    @Published private(set) var hasStoredConversations = false
+    @Published private(set) var threads: [ThreadSummary] = [] {
+        didSet {
+            if !threads.isEmpty {
+                hasStoredConversations = true
+            }
+        }
+    }
     @Published private(set) var participantOptions: [ParticipantRecord] = []
     @Published var focusedThreadIDs: Set<String>?
     @Published var selectedThreadID: String? {
@@ -162,6 +169,11 @@ final class AppViewModel: ObservableObject {
         if initialAppFlow == .determining {
             initialAppFlow = .welcome
         }
+
+        // The welcome screen offers "Send Library to iPhone" only when there is
+        // something to send; check the stored library directly since threads
+        // stay unloaded until the privacy unlock.
+        hasStoredConversations = ((try? await store.loadThreadSummaries(filters: LibraryFilters()))?.isEmpty == false)
     }
 
     /// Watch for the app regaining focus (e.g. the user returning from System
