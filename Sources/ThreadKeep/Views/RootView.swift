@@ -309,6 +309,18 @@ struct RootView: View {
                     columnVisibility = .all
                     isShowingWelcomeScreen = false
                 }
+            },
+            sendToIPhone: viewModel.threads.isEmpty ? nil : {
+                Task { @MainActor in
+                    guard await unlockThreadKeepSession(reason: "ThreadKeep needs your Mac password before it can send conversations to your iPhone.") else {
+                        return
+                    }
+                    isSingleConversationFocusMode = false
+                    viewModel.focusedThreadIDs = nil
+                    columnVisibility = .all
+                    isShowingWelcomeScreen = false
+                    viewModel.beginWiFiSyncToIPhone()
+                }
             }
         )
         .background(Color(nsColor: .windowBackgroundColor))
@@ -568,6 +580,7 @@ private struct IntroOnboardingView: View {
     @Binding var useContactsNames: Bool
     let beginImport: () -> Void
     let continueWithoutImporting: () -> Void
+    let sendToIPhone: (() -> Void)?
 
     var body: some View {
         VStack {
@@ -615,13 +628,25 @@ private struct IntroOnboardingView: View {
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
 
-                Button {
-                    beginImport()
-                } label: {
-                    Label("Import Messages", systemImage: "tray.and.arrow.down.fill")
+                HStack(spacing: 12) {
+                    Button {
+                        beginImport()
+                    } label: {
+                        Label("Import Messages", systemImage: "tray.and.arrow.down.fill")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
+
+                    if let sendToIPhone {
+                        Button {
+                            sendToIPhone()
+                        } label: {
+                            Label("Send Library to iPhone", systemImage: "iphone")
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.large)
+                    }
                 }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
 
                 Button("Open Without Importing Yet") {
                     continueWithoutImporting()
