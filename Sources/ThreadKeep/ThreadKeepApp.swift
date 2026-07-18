@@ -268,6 +268,13 @@ private struct ThreadKeepCommands: Commands {
                 Task { await viewModel.exportVisibleLibraryJSON() }
             }
             .disabled(viewModel.threads.isEmpty || viewModel.isBusy)
+
+            Divider()
+
+            Button("Send to iPhone over Wi-Fi…") {
+                NotificationCenter.default.post(name: .threadKeepRequestWiFiSync, object: nil)
+            }
+            .disabled(viewModel.threads.isEmpty || viewModel.isBusy)
         }
 
         // Edit → Find in Conversation (⌘F) / Find Next (⌘G) / Find Previous (⇧⌘G)
@@ -307,4 +314,7 @@ extension Notification.Name {
 
     /// Posted when the user picks Help → Contact Support… (or the Settings link).
     static let threadKeepRequestContactSupport = Notification.Name("com.threadkeep.app.requestContactSupport")
+
+    /// Posted when the user picks File → Send to iPhone over Wi-Fi….
+    static let threadKeepRequestWiFiSync = Notification.Name("com.threadkeep.app.requestWiFiSync")
 }

@@ -36,7 +36,14 @@ final class AppViewModel: ObservableObject {
     static let defaultLibraryStatusMessage = "All your conversations in one place."
 
     @Published var libraryFilters = LibraryFilters()
-    @Published private(set) var threads: [ThreadSummary] = []
+    @Published private(set) var hasStoredConversations = false
+    @Published private(set) var threads: [ThreadSummary] = [] {
+        didSet {
+            if !threads.isEmpty {
+                hasStoredConversations = true
+            }
+        }
+    }
     @Published private(set) var participantOptions: [ParticipantRecord] = []
     @Published var focusedThreadIDs: Set<String>?
     @Published var selectedThreadID: String? {
@@ -60,6 +67,7 @@ final class AppViewModel: ObservableObject {
     @Published var statusMessage = AppViewModel.defaultLibraryStatusMessage
     @Published var alertInfo: AppAlertInfo?
     @Published var activityStatusBanner: ActivityStatusBanner?
+    @Published private(set) var wifiSyncServer: ThreadKeepWiFiSyncServer?
 
     let store: ArchiveStore
     private let pdfExporter: ThreadPDFExporter
@@ -161,6 +169,11 @@ final class AppViewModel: ObservableObject {
         if initialAppFlow == .determining {
             initialAppFlow = .welcome
         }
+
+        // The welcome screen offers "Send Library to iPhone" only when there is
+        // something to send; check the stored library directly since threads
+        // stay unloaded until the privacy unlock.
+        hasStoredConversations = ((try? await store.loadThreadSummaries(filters: LibraryFilters()))?.isEmpty == false)
     }
 
     /// Watch for the app regaining focus (e.g. the user returning from System
@@ -967,6 +980,71 @@ final class AppViewModel: ObservableObject {
             showActivityStatus(nil)
             present(error: error, title: "Library Sync Failed")
         }
+    }
+
+    /// Starts the Wi-Fi sync server and exposes it for the sheet UI.
+    ///
+    /// The archives provider loads every thread in the library and exports it
+    /// as a mobile archive; threads whose export fails are skipped rather than
+    /// failing the whole transfer, so the count the phone sees is the count
+    /// actually sent.
+    enum WiFiSyncScope: Equatable {
+        case entireLibrary
+        case threads([String])
+    }
+
+    func beginWiFiSyncToIPhoneForSelection() {
+        guard let selectedThreadID = selectedThread?.id else {
+            return
+        }
+        beginWiFiSyncToIPhone(scope: .threads([selectedThreadID]))
+    }
+
+    func beginWiFiSyncToIPhone(scope: WiFiSyncScope = .entireLibrary) {
+        if let wifiSyncServer {
+            // Already presenting; just make sure it's listening.
+            wifiSyncServer.start()
+            return
+        }
+
+        let store = self.store
+        let server = ThreadKeepWiFiSyncServer(archivesProvider: { progress in
+            let allSummaries = try await store.loadThreadSummaries(filters: LibraryFilters())
+            let summaries: [ThreadSummary]
+            switch scope {
+            case .entireLibrary:
+                summaries = allSummaries
+            case .threads(let threadIDs):
+                let wantedIDs = Set(threadIDs)
+                summaries = allSummaries.filter { wantedIDs.contains($0.id) }
+            }
+            let exporter = ThreadKeepMobileArchiveExporter()
+            var archives: [(name: String, data: Data)] = []
+            archives.reserveCapacity(summaries.count)
+            progress(0, summaries.count)
+            for (index, summary) in summaries.enumerated() {
+                defer {
+                    progress(index + 1, summaries.count)
+                }
+                do {
+                    let data = try await store.exportThreadKeepArchiveData(for: summary.id)
+                    archives.append((name: exporter.suggestedFilename(for: summary.title), data: data))
+                } catch {
+                    // Skip conversations that fail to export; send the rest.
+                    continue
+                }
+            }
+            return archives
+        })
+
+        wifiSyncServer = server
+        server.start()
+    }
+
+    /// Stops the Wi-Fi sync server and dismisses its sheet.
+    func endWiFiSyncToIPhone() {
+        wifiSyncServer?.stop()
+        wifiSyncServer = nil
     }
 
     func saveSelectedThreadKeepArchiveFile(
