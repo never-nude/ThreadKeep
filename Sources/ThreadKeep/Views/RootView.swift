@@ -577,7 +577,6 @@ private struct EmptyLibraryDetailView: View {
 }
 
 private struct IntroOnboardingView: View {
-    @State private var isShowingIPhoneAppQR = false
     @Binding var useContactsNames: Bool
     let beginImport: () -> Void
     let continueWithoutImporting: () -> Void
@@ -674,14 +673,30 @@ private struct IntroOnboardingView: View {
                     .controlSize(.large)
                     .tint(.black)
 
-                    Button("Need the iPhone app? Show a code to scan") {
-                        isShowingIPhoneAppQR = true
+                }
+
+                Divider()
+                    .frame(maxWidth: 340)
+
+                HStack(alignment: .center, spacing: 14) {
+                    if let qrImage = IPhoneAppQRView.qrImage(for: ThreadKeepAppLinks.iPhoneAppURL.absoluteString) {
+                        Image(nsImage: qrImage)
+                            .interpolation(.none)
+                            .resizable()
+                            .frame(width: 96, height: 96)
+                            .background(Color.white)
+                            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                     }
-                    .buttonStyle(.plain)
-                    .font(.system(size: 12))
-                    .foregroundStyle(Color.accentColor)
-                    .popover(isPresented: $isShowingIPhoneAppQR) {
-                        IPhoneAppQRView()
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Get ThreadKeep for iPhone")
+                            .font(.system(size: 13, weight: .semibold))
+
+                        Text("Point your iPhone's camera at the code — the download page opens right on the phone.")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: 230, alignment: .leading)
                     }
                 }
             }
