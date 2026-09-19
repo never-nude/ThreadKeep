@@ -85,6 +85,25 @@ struct RootView: View {
         .sheet(isPresented: $isShowingContactSupport) {
             ContactSupportView()
         }
+        .onReceive(NotificationCenter.default.publisher(for: .threadKeepRequestWiFiSync)) { _ in
+            viewModel.beginWiFiSyncToIPhone()
+        }
+        .sheet(
+            isPresented: Binding(
+                get: { viewModel.wifiSyncServer != nil },
+                set: { isPresented in
+                    if !isPresented {
+                        viewModel.endWiFiSyncToIPhone()
+                    }
+                }
+            )
+        ) {
+            if let server = viewModel.wifiSyncServer {
+                IPhoneWiFiSyncView(server: server) {
+                    viewModel.endWiFiSyncToIPhone()
+                }
+            }
+        }
         .task {
             resetPrivacyLaunchStateForLaunch()
             applyInitialAppFlowIfNeeded(with: viewModel.initialAppFlow)
@@ -136,11 +155,43 @@ struct RootView: View {
                         openImportFlow(mode: .all, returnToWelcomeAfterDismiss: false)
                     }
                 } else {
-                    ContentUnavailableView(
-                        "Your Messages Library",
-                        systemImage: "tray",
-                        description: Text("Choose a conversation on the left, or use search to find one.")
-                    )
+                    VStack(spacing: 24) {
+                        Spacer()
+
+                        Image(systemName: "tray")
+                            .font(.system(size: 44))
+                            .foregroundStyle(.secondary)
+
+                        VStack(spacing: 6) {
+                            Text("Your Messages Library")
+                                .font(.title2.weight(.semibold))
+
+                            Text("Choose a conversation on the left, or use search to find one.")
+                                .font(.callout)
+                                .foregroundStyle(.secondary)
+                        }
+
+                        VStack(spacing: 10) {
+                            Button {
+                                viewModel.beginWiFiSyncToIPhone()
+                            } label: {
+                                Label("Send Library to iPhone", systemImage: "iphone")
+                                    .font(.headline)
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 4)
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .controlSize(.large)
+                            .disabled(viewModel.threads.isEmpty || viewModel.isBusy)
+
+                            Text("Every conversation goes straight to ThreadKeep on your iPhone over Wi-Fi.")
+                                .font(.callout)
+                                .foregroundStyle(.secondary)
+                        }
+
+                        Spacer()
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
             .background(Color(nsColor: .windowBackgroundColor))
@@ -155,6 +206,24 @@ struct RootView: View {
                 .labelStyle(.iconOnly)
                 .help("Show the welcome screen")
                 .accessibilityLabel("Home")
+
+                Menu {
+                    Button("Send Entire Library…") {
+                        viewModel.beginWiFiSyncToIPhone()
+                    }
+                    .disabled(viewModel.threads.isEmpty)
+
+                    Button("Send This Conversation…") {
+                        viewModel.beginWiFiSyncToIPhoneForSelection()
+                    }
+                    .disabled(viewModel.selectedThread == nil)
+                } label: {
+                    Label("Send to iPhone", systemImage: "iphone")
+                }
+                .labelStyle(.iconOnly)
+                .disabled(viewModel.isBusy)
+                .help("Send conversations to ThreadKeep on your iPhone over Wi-Fi")
+                .accessibilityLabel("Send to iPhone")
 
                 Menu {
                     Button("Export PDF") {
@@ -186,6 +255,13 @@ struct RootView: View {
 
                     Button("Export Library as JSON") {
                         Task { await viewModel.exportVisibleLibraryJSON() }
+                    }
+                    .disabled(viewModel.threads.isEmpty)
+
+                    Divider()
+
+                    Button("Send to iPhone over Wi-Fi…") {
+                        viewModel.beginWiFiSyncToIPhone()
                     }
                     .disabled(viewModel.threads.isEmpty)
                 } label: {
@@ -232,6 +308,18 @@ struct RootView: View {
                     viewModel.focusedThreadIDs = nil
                     columnVisibility = .all
                     isShowingWelcomeScreen = false
+                }
+            },
+            sendToIPhone: !viewModel.hasStoredConversations ? nil : {
+                Task { @MainActor in
+                    guard await unlockThreadKeepSession(reason: "ThreadKeep needs your Mac password before it can send conversations to your iPhone.") else {
+                        return
+                    }
+                    isSingleConversationFocusMode = false
+                    viewModel.focusedThreadIDs = nil
+                    columnVisibility = .all
+                    isShowingWelcomeScreen = false
+                    viewModel.beginWiFiSyncToIPhone()
                 }
             }
         )
@@ -492,6 +580,7 @@ private struct IntroOnboardingView: View {
     @Binding var useContactsNames: Bool
     let beginImport: () -> Void
     let continueWithoutImporting: () -> Void
+    let sendToIPhone: (() -> Void)?
 
     var body: some View {
         VStack {
@@ -539,18 +628,77 @@ private struct IntroOnboardingView: View {
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
 
-                Button {
-                    beginImport()
-                } label: {
-                    Label("Import Messages", systemImage: "tray.and.arrow.down.fill")
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
+                VStack(alignment: .leading, spacing: 16) {
+                    if let sendToIPhone {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Button {
+                                sendToIPhone()
+                            } label: {
+                                Label("Send Library to iPhone", systemImage: "iphone")
+                                    .frame(maxWidth: 340)
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .controlSize(.large)
+                            .tint(.blue)
 
-                Button("Open Without Importing Yet") {
-                    continueWithoutImporting()
+                            Text("Beams every saved conversation to ThreadKeep on your iPhone. No extra Mac permissions needed.")
+                                .font(.system(size: 12))
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Button {
+                            beginImport()
+                        } label: {
+                            Label("Import Messages to This Mac", systemImage: "tray.and.arrow.down.fill")
+                                .frame(maxWidth: 340)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.large)
+                        .tint(Color(nsColor: .darkGray))
+
+                        Text("Adds conversations from Messages into your library. macOS asks for Full Disk Access first.")
+                            .font(.system(size: 12))
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Button {
+                        continueWithoutImporting()
+                    } label: {
+                        Text("Don't Import — Just Open")
+                            .frame(maxWidth: 340)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
+                    .tint(.black)
+
                 }
-                .font(.system(size: 12))
+
+                Divider()
+                    .frame(maxWidth: 340)
+
+                HStack(alignment: .center, spacing: 14) {
+                    if let qrImage = IPhoneAppQRView.qrImage(for: ThreadKeepAppLinks.iPhoneAppURL.absoluteString) {
+                        Image(nsImage: qrImage)
+                            .interpolation(.none)
+                            .resizable()
+                            .frame(width: 96, height: 96)
+                            .background(Color.white)
+                            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    }
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Get ThreadKeep for iPhone")
+                            .font(.system(size: 13, weight: .semibold))
+
+                        Text("Point your iPhone's camera at the code — the download page opens right on the phone.")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: 230, alignment: .leading)
+                    }
+                }
             }
             .padding(32)
             .frame(maxWidth: 680, alignment: .leading)
